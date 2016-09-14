@@ -2709,7 +2709,7 @@ def EntityPropertyValueInJSON(v):
         # offset
         ticks = (v.value.date.get_absolute_day() - BASE_DAY) * \
             TICKS_PER_DAY + int(v.value.time.get_total_seconds() * 1000)
-        dir, offset = v.get_zone()
+        dir, offset = v.value.time.get_zone()
         if dir > 0:
             s = u"+"
         else:
