@@ -7,7 +7,7 @@ copyright = u"\xA92008-2016, Steve Lay"
 
 major_version = "0.6"
 build_date = "20160201"
-version = "%s.%s" % (major_version, build_date)
+version = "%s.%s_j5_1dev" % (major_version, build_date)
 
 title = (
     "Pyslet: "
