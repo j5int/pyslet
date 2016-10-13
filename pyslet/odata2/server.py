@@ -351,7 +351,7 @@ class Server(app.Server):
                 u"Method not allowed: %s" % unicode(e),
                 400)
         except ValueError as e:
-            traceback.print_exception(*sys.exc_info())
+            logging.error("Error in OData call: %s", "".join(traceback.format_exception(*sys.exc_info())))
             # This is a bad request
             return self.ODataError(
                 core.ODataURI('error'),
@@ -361,7 +361,7 @@ class Server(app.Server):
                 unicode(e))
         except:
             eInfo = sys.exc_info()
-            traceback.print_exception(*eInfo)
+            logging.error("UnexpectedError in OData call: %s", "".join(traceback.format_exception(*sys.exc_info())))
             # return self.HandleError(core.ODataURI('error'),
             #   environ,start_response)
             return self.ODataError(
