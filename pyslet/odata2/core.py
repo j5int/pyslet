@@ -2743,7 +2743,8 @@ def ReadEntityPropertyValueInJSON(v, jsonValue):
         v.SetFromLiteral(jsonValue)
     elif isinstance(v, (edm.DateTimeOffsetValue)):
         if jsonValue.startswith("/Date(") and jsonValue.endswith(")/"):
-            ticks = int(jsonValue[6:-2])
+            # handle format "/Date(1476436582)" or "/Date(1476436582+0200)"
+            ticks = jsonValue[6:-2]
             if '+' in ticks:
                 # split by +
                 ticks = ticks.split('+')
@@ -2761,9 +2762,9 @@ def ReadEntityPropertyValueInJSON(v, jsonValue):
                 zoffset = int(ticks[1])
             else:
                 zoffset = 0
-            t, overflow = Time().offset(
+            t, overflow = iso.Time().offset(
                 seconds=int(ticks[0]) / 1000.0).with_zone(zdir, zoffset // 60, zoffset % 60)
-            d = Date(absolute_day=BASE_DAY + overflow)
+            d = iso.Date(absolute_day=BASE_DAY + overflow)
             v.set_from_value(iso.TimePoint(date=d, time=t))
         elif jsonValue.endswith('Z'):
             # Parse the incoming date using the ISO 8601 format
