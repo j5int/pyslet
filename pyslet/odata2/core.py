@@ -2763,7 +2763,8 @@ def ReadEntityPropertyValueInJSON(v, jsonValue):
             else:
                 zoffset = 0
             t, overflow = iso.Time().offset(
-                seconds=int(ticks[0]) / 1000.0).with_zone(zdir, zoffset // 60, zoffset % 60)
+                seconds=int(ticks[0]) / 1000.0)
+            t = t.with_zone(zdir, zoffset // 60, zoffset % 60)
             d = iso.Date(absolute_day=BASE_DAY + overflow)
             v.set_from_value(iso.TimePoint(date=d, time=t))
         elif jsonValue.endswith('Z'):
