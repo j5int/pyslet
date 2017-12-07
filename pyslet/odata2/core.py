@@ -1845,14 +1845,14 @@ class Parser(edm.Parser):
 
 
 @old_function('ParseURILiteral')
-def uri_literal_from_str(source):
+def uri_literal_from_str(source, already_escaped=False):
     """Parses a URI-literal value from a source string.
 
     source
         A URI-encoded character string
 
     Returns a :class:`~pyslet.odata2.csdl.SimpleValue` instance."""
-    p = Parser(uri.unescape_data(source).decode('utf-8'))
+    p = Parser(source if already_escaped else uri.unescape_data(source).decode('utf-8'))
     return p.require_production_end(p.parse_uri_literal(), "uri literal")
 
 
@@ -2345,7 +2345,7 @@ class ODataURI(PEP8Compatibility):
             if len(keys) == 0:
                 return name, {}
             elif len(keys) == 1:
-                return name, {keys[0][0]: uri_literal_from_str(keys[0][1])}
+                return name, {keys[0][0]: uri_literal_from_str(keys[0][1], already_escaped=True)}
             else:
                 key_predicate = {}
                 for k in keys:
@@ -2353,7 +2353,7 @@ class ODataURI(PEP8Compatibility):
                         raise ValueError(
                             "unrecognized key predicate: %s" % repr(keys))
                     kname, value = k
-                    kvalue = uri_literal_from_str(value)
+                    kvalue = uri_literal_from_str(value, already_escaped=True)
                     key_predicate[kname] = kvalue
                 return name, key_predicate
         else:
