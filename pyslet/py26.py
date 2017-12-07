@@ -1,13 +1,14 @@
 #! /usr/bin/env python
 """Experimental module for Python 2.6 compatibility."""
 
-import sys
-import logging
 import io
+import logging
+import sys
 import zipfile
+
 from wsgiref.simple_server import ServerHandler
 
-from pyslet.py2 import is_text
+from .py2 import is_text, builtins
 
 
 py26 = sys.hexversion < 0x02070000
@@ -43,6 +44,23 @@ def is_zipfile(filename):
 
 
 if py26:
+    def get_method_function(methodlike):
+        if isinstance(methodlike, classmethod):
+            # second arg just needs to be any type
+            return methodlike.__get__(None, type).im_func
+        elif isinstance(methodlike, staticmethod):
+            return methodlike.__get__(None, type)
+        else:
+            return methodlike
+else:
+    def get_method_function(methodlike):
+        if isinstance(methodlike, (classmethod, staticmethod)):
+            return methodlike.__func__
+        else:
+            return methodlike
+
+
+if py26:
     logging.info("Adding missing constants to py26.io")
     io.SEEK_SET = 0
     io.SEEK_CUR = 1
@@ -58,3 +76,31 @@ if py26:
 
     logging.info("Patching zipfile.is_zipfile for open files")
     zipfile.is_zipfile = is_zipfile
+else:
+    memoryview = builtins.memoryview
+
+
+if py26:
+    class RawIOBase(io.RawIOBase):
+
+        def read(self, n=-1):
+            """Read and return up to n bytes.
+
+            Returns an empty bytes array on EOF, or None if the object is
+            set not to block and has no data to read.
+
+            Adapted from python2.6/io.py to deal with failure to return
+            None in non-blocking case."""
+            if n is None:
+                n = -1
+            if n < 0:
+                return self.readall()
+            b = bytearray(n.__index__())
+            n = self.readinto(b)
+            if n is None:
+                return None
+            else:
+                del b[n:]
+                return bytes(b)
+else:
+    RawIOBase = io.RawIOBase

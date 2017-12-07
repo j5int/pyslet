@@ -11,44 +11,66 @@ from oauthlib import oauth2
 
 from optparse import OptionParser
 
-import pyslet.imsbltiv1p0 as lti
-import pyslet.xml20081126.structures as xml
-import pyslet.odata2.csdl as edm
-import pyslet.odata2.core as odata
-import pyslet.http.client as http
-import pyslet.wsgi as wsgi
-
+from pyslet import imsbltiv1p0 as lti
+from pyslet import wsgi
+from pyslet.http import client as http
+from pyslet.odata2 import core as odata
+from pyslet.odata2 import csdl as edm
+from pyslet.py2 import long2
 from pyslet.rfc2396 import URI
+from pyslet.xml import structures as xml
+
 
 from noticeboard import NoticeBoard
 
 
-class MultiTenantSession(lti.ToolProviderSession):
+class MultiTenantSession(wsgi.CookieSession):
 
-    def get_owner(self):
-        """Returns the owner of the session
+    def __init__(self, src=None):
+        super(MultiTenantSession, self).__init__(src)
+        if src:
+            fields = src.split('-')
+            if len(fields) >= 4:
+                if fields[3]:
+                    self.owner = long2(fields[3])
+                else:
+                    self.owner = None
+            else:
+                raise ValueError("Bad Session: %s" % src)
+        else:
+            self.owner = None
+
+    def __unicode__(self):
+        return "%s-%s" % (
+            super(MultiTenantSession, self).__unicode__(),
+            "" if self.owner is None else str(self.owner))
+
+    def get_owner_id(self):
+        """Returns the ID of the owner of the session
 
         The owner is the person logged in to the root of the
         application.  It may be None.  This should not be confused with
         a user associated with the session via an LTI launch.
 
         If there is no owner, None is returned."""
-        if self.entity.exists:
-            return self.entity['Owner'].GetEntity()
-        else:
-            return None
+        return self.owner
 
-    def del_owner(self):
+    def set_owner_id(self, owner_id):
+        """Sets the ID of the owner of the session"""
+        self.owner = owner_id
+
+    def del_owner_id(self):
         """Removes the link between the session and the current owner
 
         Called when the person logged in to the root of the application
-        logs outs.  Future calls to :meth:`get_owner` will return
-        None."""
-        if self.entity.exists:
-            with self.entity['Owner'].OpenCollection() as collection:
-                collection.clear()
-        else:
-            self.entity['Owner'].ClearBindings()
+        logs outs.  Future calls to :meth:`get_owner_id` will return
+        None.
+
+        You MUST call
+        :meth:`~pyslet.wsgi.WSGISessionApp.set_session_cookie` after
+        modifying the session to ensure the owner is removed from the
+        browser cookie."""
+        self.owner = None
 
 
 class MultiTenantTPApp(lti.ToolProviderApp):
@@ -109,10 +131,30 @@ class MultiTenantTPApp(lti.ToolProviderApp):
         self.set_method('/consumers/del', self.consumer_del_page)
         self.set_method('/consumers/del_action', self.consumer_del_action)
 
+    def get_owner(self, context):
+        current_owner = context.session.get_owner_id()
+        if current_owner is not None:
+            with self.container['Owners'].open() as collection:
+                try:
+                    current_owner = collection[current_owner]
+                except KeyError:
+                    context.session.del_owner_id()
+                    self.set_session_cookie(context)
+                    current_owner = None
+        return current_owner
+
+    def set_owner(self, context, owner):
+        context.session.set_owner_id(owner['Key'].value)
+        self.set_session_cookie(context)
+
+    def del_owner(self, context):
+        context.session.del_owner_id()
+        self.set_session_cookie(context)
+
     @wsgi.session_decorator
     def home(self, context):
-        page_context = self.new_page_context(context)
-        current_owner = context.session.get_owner()
+        page_context = self.new_context_dictionary(context)
+        current_owner = self.get_owner(context)
         page_context['logout'] = False
         if current_owner:
             page_context['got_user'] = True
@@ -121,9 +163,9 @@ class MultiTenantTPApp(lti.ToolProviderApp):
             page_context['got_user'] = False
             if self.google_id:
                 page_context['google_sso'] = True
-                page_context['gclient_id_attr'] = xml.EscapeCharData7(
+                page_context['gclient_id_attr'] = xml.escape_char_data7(
                     self.google_id, True)
-                page_context[self.csrf_token] = context.session.sid()
+                page_context[self.csrf_token] = context.session.sid
             else:
                 page_context['google_sso'] = False
         data = self.render_template(context, 'mthome.html', page_context)
@@ -145,7 +187,7 @@ class MultiTenantTPApp(lti.ToolProviderApp):
         code = context.get_form_string('code')
         if code == 'logout':
             # this is the logout action
-            context.session.del_owner()
+            context.session.del_owner(context)
             context.set_status(200)
             return self.json_response(
                 context, json.dumps("session owner logged out"))
@@ -175,7 +217,7 @@ class MultiTenantTPApp(lti.ToolProviderApp):
             logging.warn("OAuth request returned status: %i", req.status)
             raise wsgi.BadRequest
         userinfo = json.loads(req.res_body.decode('utf-8'))
-        current_owner = context.session.get_owner()
+        current_owner = self.get_owner(context)
         if current_owner:
             if (current_owner['IDType'].value == 'google' and
                     current_owner['ID'].value == userinfo['id']):
@@ -185,14 +227,12 @@ class MultiTenantTPApp(lti.ToolProviderApp):
                 return self.json_response(
                     context, json.dumps("Already logged in"))
             # clear this link
-            with context.session.entity['Owner'].OpenCollection() as \
-                    collection:
-                collection.clear()
+            self.del_owner(context)
         logging.debug("Google user logged in: %s <%s>", userinfo['name'],
                       userinfo['email'])
-        with self.container['Owners'].OpenCollection() as collection:
+        with self.container['Owners'].open() as collection:
             # let's find this user in our database
-            id = edm.EDMValue.NewSimpleValue(edm.SimpleType.String)
+            id = edm.EDMValue.from_type(edm.SimpleType.String)
             id.set_from_value(userinfo['id'])
             filter = odata.CommonExpression.from_str(
                 "IDType eq 'google' and ID eq :id", {'id': id})
@@ -209,20 +249,20 @@ class MultiTenantTPApp(lti.ToolProviderApp):
                 owner['FamilyName'].set_from_value(userinfo['family_name'])
                 owner['FullName'].set_from_value(userinfo['name'])
                 owner['Email'].set_from_value(userinfo['email'])
-                owner['Session'].BindEntity(context.session.entity)
                 # and create them a silo for their data
-                with owner['Silo'].Target().OpenCollection() as silos:
+                with owner['Silo'].target().open() as silos:
                     silo = silos.new_entity()
                     silo['ID'].set_from_value(owner['Key'].value)
                     silo['Slug'].set_from_value(userinfo['email'])
                     silos.insert_entity(silo)
-                owner['Silo'].BindEntity(silo)
+                owner['Silo'].bind_entity(silo)
                 collection.insert_entity(owner)
                 # and finally create a default consumer for them
-                with silo['Consumers'].OpenCollection() as collection:
+                with silo['Consumers'].open() as collection:
                     consumer = lti.ToolConsumer.new_from_values(
                         collection.new_entity(), self.app_cipher, "default")
                     collection.insert_entity(consumer.entity)
+                self.set_owner(context, owner)
             elif len(owners) == 1:
                 # we already saw this user
                 owner = owners[0]
@@ -231,11 +271,12 @@ class MultiTenantTPApp(lti.ToolProviderApp):
                 owner['FamilyName'].set_from_value(userinfo['family_name'])
                 owner['FullName'].set_from_value(userinfo['name'])
                 owner['Email'].set_from_value(userinfo['email'])
-                owner['Session'].BindEntity(context.session.entity)
                 collection.update_entity(owner)
+                self.set_owner(context, owner)
             else:
                 logging.error("Duplicate google owner: %s <%s>",
                               id.value, userinfo['email'])
+                self.del_owner(context)
                 raise RuntimeError("Unexpected duplicate in Owners")
         context.set_status(200)
         return self.json_response(
@@ -243,38 +284,38 @@ class MultiTenantTPApp(lti.ToolProviderApp):
 
     @wsgi.session_decorator
     def logout(self, context):
-        page_context = self.new_page_context(context)
+        page_context = self.new_context_dictionary(context)
         page_context['logout'] = True
         page_context['got_user'] = False
         if self.google_id:
             page_context['google_sso'] = True
-            page_context['gclient_id_attr'] = xml.EscapeCharData7(
+            page_context['gclient_id_attr'] = xml.escape_char_data7(
                 self.google_id, True)
         else:
             page_context['google_sso'] = False
-        page_context[self.csrf_token] = context.session.sid()
+        page_context[self.csrf_token] = context.session.sid
         data = self.render_template(context, 'mthome.html', page_context)
         context.set_status(200)
         return self.html_response(context, data)
 
     @wsgi.session_decorator
     def consumers_page(self, context):
-        page_context = self.new_page_context(context)
+        page_context = self.new_context_dictionary(context)
         # add errors
         errors = set(('duplicate_key', ))
         query = context.get_query()
         error = query.get('error', '')
         for e in errors:
             page_context[e] = (e == error)
-        owner = context.session.get_owner()
+        owner = self.get_owner(context)
         if owner is None:
             # we require an owner to be logged in
             raise wsgi.PageNotAuthorized
         page_context['user_name'] = owner['FullName'].value
-        silo = owner['Silo'].GetEntity()
+        silo = owner['Silo'].get_entity()
         page_context['silo'] = silo
         consumer_list = []
-        with silo['Consumers'].OpenCollection() as collection:
+        with silo['Consumers'].open() as collection:
             collection.set_orderby(
                 odata.Parser('Handle asc').parse_orderby_option())
             for consumer in collection.itervalues():
@@ -282,19 +323,19 @@ class MultiTenantTPApp(lti.ToolProviderApp):
                 consumer = lti.ToolConsumer(consumer, self.app_cipher)
                 query = urllib.urlencode(
                     {'cid':
-                     odata.ODataURI.FormatLiteral(consumer.entity['ID'])})
+                     odata.ODataURI.format_literal(consumer.entity['ID'])})
                 citem['consumer'] = consumer
-                citem['cedit_link'] = xml.EscapeCharData7(
+                citem['cedit_link'] = xml.escape_char_data7(
                     'edit?' + query, True)
-                citem['cdel_link'] = xml.EscapeCharData7(
+                citem['cdel_link'] = xml.escape_char_data7(
                     'del?' + query, True)
                 consumer_list.append(citem)
             query = urllib.urlencode(
-                {'silo': odata.ODataURI.FormatLiteral(silo['ID'])})
-            page_context['cadd_link'] = xml.EscapeCharData7(
+                {'silo': odata.ODataURI.format_literal(silo['ID'])})
+            page_context['cadd_link'] = xml.escape_char_data7(
                 'add?' + query, True)
         page_context['consumers'] = consumer_list
-        page_context[self.csrf_token] = context.session.sid()
+        page_context[self.csrf_token] = context.session.sid
         data = self.render_template(context, 'consumers/index.html',
                                     page_context)
         context.set_status(200)
@@ -304,16 +345,16 @@ class MultiTenantTPApp(lti.ToolProviderApp):
     def consumer_add_action(self, context):
         if context.environ['REQUEST_METHOD'].upper() != 'POST':
             raise wsgi.MethodNotAllowed
-        owner = context.session.get_owner()
+        owner = self.get_owner(context)
         if owner is None:
             # we require an owner to be logged in
             raise wsgi.PageNotAuthorized
-        silo = owner['Silo'].GetEntity()
+        silo = owner['Silo'].get_entity()
         try:
             handle = context.get_form_string('handle', 80)
             key = context.get_form_string('key', 80)
             secret = context.get_form_string('secret', 80)
-            with silo['Consumers'].OpenCollection() as collection:
+            with silo['Consumers'].open() as collection:
                 consumer = lti.ToolConsumer.new_from_values(
                     collection.new_entity(), self.app_cipher, handle, key=key,
                     secret=secret)
@@ -332,24 +373,24 @@ class MultiTenantTPApp(lti.ToolProviderApp):
 
     @wsgi.session_decorator
     def consumer_edit_page(self, context):
-        page_context = self.new_page_context(context)
-        owner = context.session.get_owner()
+        page_context = self.new_context_dictionary(context)
+        owner = self.get_owner(context)
         if owner is None:
             # we require an owner to be logged in
             raise wsgi.PageNotAuthorized
         page_context['owner'] = owner
-        silo = owner['Silo'].GetEntity()
+        silo = owner['Silo'].get_entity()
         page_context['silo'] = silo
         query = context.get_query()
-        cid = odata.ParseURILiteral(query.get('cid', '')).value
-        with silo['Consumers'].OpenCollection() as collection:
+        cid = odata.uri_literal_from_str(query.get('cid', '')).value
+        with silo['Consumers'].open() as collection:
             try:
                 consumer = lti.ToolConsumer(collection[cid], self.app_cipher)
             except KeyError:
                 raise wsgi.PageNotAuthorized
         page_context['consumer'] = consumer
-        page_context['cid_attr'] = xml.EscapeCharData7(str(cid), True)
-        page_context[self.csrf_token] = context.session.sid()
+        page_context['cid_attr'] = xml.escape_char_data7(str(cid), True)
+        page_context[self.csrf_token] = context.session.sid
         data = self.render_template(context, 'consumers/edit_form.html',
                                     page_context)
         context.set_status(200)
@@ -359,16 +400,16 @@ class MultiTenantTPApp(lti.ToolProviderApp):
     def consumer_edit_action(self, context):
         if context.environ['REQUEST_METHOD'].upper() != 'POST':
             raise wsgi.MethodNotAllowed
-        owner = context.session.get_owner()
+        owner = self.get_owner(context)
         if owner is None:
             # we require an owner to be logged in
             raise wsgi.PageNotAuthorized
-        silo = owner['Silo'].GetEntity()
+        silo = owner['Silo'].get_entity()
         try:
             cid = context.get_form_long('cid')
             key = context.get_form_string('key', 80)
             secret = context.get_form_string('secret', 80)
-            with silo['Consumers'].OpenCollection() as collection:
+            with silo['Consumers'].open() as collection:
                 consumer = lti.ToolConsumer(collection[cid], self.app_cipher)
                 # we never change the handle
                 consumer.update_from_values(key, secret)
@@ -381,23 +422,23 @@ class MultiTenantTPApp(lti.ToolProviderApp):
 
     @wsgi.session_decorator
     def consumer_del_page(self, context):
-        page_context = self.new_page_context(context)
-        owner = context.session.get_owner()
+        page_context = self.new_context_dictionary(context)
+        owner = self.get_owner(context)
         if owner is None:
             # we require an owner to be logged in
             raise wsgi.PageNotAuthorized
         page_context['owner'] = owner
-        silo = owner['Silo'].GetEntity()
+        silo = owner['Silo'].get_entity()
         page_context['silo'] = silo
         query = context.get_query()
-        cid = odata.ParseURILiteral(query.get('cid', '')).value
-        with silo['Consumers'].OpenCollection() as collection:
+        cid = odata.uri_literal_from_str(query.get('cid', '')).value
+        with silo['Consumers'].open() as collection:
             try:
                 consumer = collection[cid]
             except KeyError:
                 raise wsgi.PageNotAuthorized
         page_context['consumer'] = consumer
-        page_context[self.csrf_token] = context.session.sid()
+        page_context[self.csrf_token] = context.session.sid
         data = self.render_template(context, 'consumers/del_form.html',
                                     page_context)
         context.set_status(200)
@@ -407,17 +448,17 @@ class MultiTenantTPApp(lti.ToolProviderApp):
     def consumer_del_action(self, context):
         if context.environ['REQUEST_METHOD'].upper() != 'POST':
             raise wsgi.MethodNotAllowed
-        owner = context.session.get_owner()
+        owner = self.get_owner(context)
         if owner is None:
             # we require an owner to be logged in
             raise wsgi.PageNotAuthorized
-        silo = owner['Silo'].GetEntity()
+        silo = owner['Silo'].get_entity()
         try:
             cid = context.get_form_long('cid')
-            with silo['Consumers'].OpenCollection() as collection:
+            with silo['Consumers'].open() as collection:
                 consumer = collection[cid]
                 # now to delete we must delete from the parent collection
-                consumer.Delete()
+                consumer.delete()
         except ValueError:
             raise wsgi.BadRequest
         except KeyError:

@@ -29,14 +29,21 @@ LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
 
+import decimal
 import time as pytime
 import warnings
 
 from math import modf, floor
 
-from pyslet.py2 import range3, is_text, UnicodeMixin, CmpMixin
-from pyslet.pep8 import PEP8Compatibility
-from pyslet.unicode5 import BasicParser
+from .pep8 import PEP8Compatibility
+from .py2 import (
+    is_string,
+    is_text,
+    range3,
+    SortableMixin,
+    to_text,
+    UnicodeMixin)
+from .unicode5 import BasicParser
 
 
 class DateTimeError(Exception):
@@ -143,52 +150,116 @@ class Precision(object):
     Complete = 7    #: constant for complete representations
 
 
-class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
+class Date(PEP8Compatibility, SortableMixin, UnicodeMixin):
 
     """A class for representing ISO dates.
 
     Values can represent dates with reduced precision, for example::
 
-        Date(century=20,year=13,month=12)
+        Date(century=20, year=13, month=12)
 
     represents December 2013, no specific day.
 
     There are a number of different forms of the constructor based on
     named parameters, the simplest is::
 
-        Date(century=19,year=69,month=7,day=20)
+        Date(century=19, year=69, month=7, day=20)
 
-    You can also use weekday format (note that decade must be provided
-    separately)::
+    You can also use weekday format (decade must be provided separately
+    when using this format)::
 
-        Date(century=19,decade=6,year=9,week=29,weekday=7)
+        Date(century=19, decade=6, year=9, week=29, weekday=7)
 
-    Ordinal format (where day 1 is 1st Jan)::
+    ...ordinal format (where day 1 is 1st Jan)::
 
-        Date(century=19,year=69,ordinal_day=201)
+        Date(century=19, year=69, ordinal_day=201)
 
-    Absolute format (where day 1 is the notional 1st Jan 0001)::
+    ...absolute format (where day 1 is the notional 1st Jan 0001)::
 
         Date(absolute_day=718998)
 
     An empty constructor is equivalent to::
 
-        Date()==Date(absolute_day=1)
+        Date() == Date(absolute_day=1)      # True
 
-    All constructors except the absolute form allow the passing of a
+    By default the calendar used supports dates in the range 0001-01-01
+    through to 9999-12-31.  ISO 8601 allows this range to be extended
+    *by agreement* using a fixed number of additional digits in the
+    century specification.  These dates are referred to as *expanded*
+    dates and they include provision for negative, as well as larger
+    positive, years using the astronomical convention of including a
+    year 0.
+
+    Given that the use of expanded dates can only be done by agreement
+    the constructor supports an additional parameter to enable you to
+    construct a date using an *agreed* number of additional digits::
+
+        Date(century=19, year=69, month=7, day=20, xdigits=2)
+
+    The above instance represents the same date as the previous examples
+    but with an expanded century representation consisting of an
+    *additional* two decimal digits.  Using xdigits=2 the range of
+    allowable dates is now -999999-01-01 to +999999-12-31.  Notice that
+    ISO 8601 uses the leading +/- to indicate the use of an expanded
+    form.  If one instance is used to create another, e.g., using
+    :meth:`offset` or the base parameter described below then value of
+    xdigits is copied from the existing instance to the new one.
+
+    It is acceptable for xdigits to be set to 0, this indicates expanded
+    dates with *no* additional decimal digits but has the effect of
+    extending the default range to -9999-01-01 to +9999-12-31.
+
+    When constructing instances for negative years you must set the bce
+    flag on the constructor (indicating that the date is "before common
+    era").  The values passed for century and year (and optionally
+    decade when using weekday form) must always be positive as they
+    would be written in the documented ISO decimal forms.
+
+    Expanded dates include the year 0 (as per ISO 8601).  As a result,
+    the common meaning of 1 BCE would be year 0, not year -1.  To
+    represent the year 753 BCE you would use::
+
+        Date(bce=True, century=7, year=52, xdigits=0)
+
+    For year 0, the bce flag can be set either way (or omitted).
+
+    The constructor includes a wildcard form of expansion using the
+    special value -1 for xdigits.  Such dates are assumed to have been
+    represented in the minimum number of decimal digits for the century
+    (but not less than 4) and will accept a century of any size.
+
+    ..  warn:   Python's default div/mod operators create results that
+                are useful mathematically but can trip you up when
+                dealing with negative values.  You cannot take a year as
+                an integer and simply pass year // 100 for the century
+                as -752 // 100 is -8, not -7!  As a convenience, this
+                class provides a staticmethod :meth:`split_year`.
+
+    All constructors, except the absolute form, allow the passing of a
     *base* date which allows the most-significant values to be omitted,
-    for example::
+    (truncated forms) for example::
 
-        base=Date(century=19,year=69,month=7,day=20)
-        newDate=Date(day=21,base=base)  #: 21st July 1969
+        base = Date(century=19, year=69, month=7, day=20)
+        new_date = Date(day=21, base=base)  #: 21st July 1969
 
-    Note that *base* always represents a date *before* the newly
-    constructed date, so::
+    *base* always represents a date *on or before* the newly constructed
+    date, so::
 
-        base=Date(century=19,year=99,month=12,day=31)
-        newDate=Date(day=5,base=base)
+        base = Date(century=19, year=99, month=12, day=31)
+        new_date = Date(day=5, base=base)
 
-    constructs a Date representing the 5th January 2000
+    constructs a Date representing the 5th January 2000.  These
+    truncated forms cannot be used with xdigits as the century is never
+    present so cannot be expanded.  However, the value of *base* may be
+    an expanded date and the result is another expanded date with the
+    *same* xdigits constraint.  Caution is required when dealing with
+    negative dates::
+
+        base = Date(bce=True, century=7, year=52, month=4, day=21, xdigits=0)
+        new_date = Date(year=53, month=4, day=21, base=base)
+
+    results in the date -0653-04-21 and not -0753-04-21 because the year
+    -0753 would have been *before* the base year -0752.
 
     Given that Date can hold imprecise dates, there is some ambiguity
     over the comparisons between things such as January 1985 and Week 3
@@ -203,33 +274,39 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
     Date objects are immutable and so can be used as the keys in
     dictionaries provided they all share the same precision.
 
-    Some older functions did allow modification but these no raise an
+    Some older functions did allow modification but these now raise an
     error with an appropriate suggested refactoring.
 
     Instances can be converted directly to strings using the default,
     extended calendar format.  Other formats are supported through
     format specific methods."""
 
-    def __init__(self, src=None, base=None, century=None, decade=None,
-                 year=None, month=None, day=None, week=None, weekday=None,
-                 ordinal_day=None, absolute_day=None, **kwargs):
+    def __init__(self, src=None, base=None, bce=False, century=None,
+                 decade=None, year=None, month=None, day=None, week=None,
+                 weekday=None, ordinal_day=None, absolute_day=None,
+                 xdigits=None, **kwargs):
         PEP8Compatibility.__init__(self)
         ordinal_day = kwargs.get('ordinalDay', ordinal_day)
         absolute_day = kwargs.get('absoluteDay', absolute_day)
         if src is None:
             # explicit form
             if absolute_day:
-                self._set_from_absolute_day(absolute_day)
+                self._set_from_absolute_day(absolute_day, xdigits)
             elif decade or week or weekday:
                 self._set_from_week_day(
-                    century, decade, year, week, weekday, base)
+                    bce, century, decade, year, week, weekday, base, xdigits)
             elif ordinal_day:
-                self._set_from_ordinal_day(century, year, ordinal_day, base)
+                self._set_from_ordinal_day(
+                    bce, century, year, ordinal_day, base, xdigits)
             elif century is None and base is None:
                 # use the origin, but everything else must be None too
                 if year is not None or month is not None or day is not None:
                     raise DateTimeError("truncated date with no base")
-                #: the century, 0..99
+                #: the number of expanded digits in the century
+                self.xdigits = xdigits
+                #: BCE flag (before common era)
+                self.bce = False
+                #: the century
                 self.century = 0
                 #: the year, 0..99
                 self.year = 1
@@ -246,9 +323,12 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
                 #: the day, 1..31
                 self.day = 1
             else:
-                self._set_from_calendar_day(century, year, month, day, base)
+                self._set_from_calendar_day(
+                    bce, century, year, month, day, base, xdigits)
             self._check_date()
         elif isinstance(src, Date):
+            self.xdigits = src.xdigits
+            self.bce = src.bce
             self.century = src.century
             self.year = src.year
             self.month = src.month
@@ -257,16 +337,49 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
         else:
             raise TypeError("Can't construct Date from %s" % repr(src))
 
-    def _set_from_absolute_day(self, abs_day):
-        quad_century = 146097  # 365*400+97 always holds
-        century = 36524     # 365*100+24 excludes centennial leap
+    def _set_from_absolute_day(self, abs_day, xdigits):
+        quad_century = 146097   # 365*400+97 always holds
+        century = 36524         # 365*100+24 excludes centennial leap
         quad_year = 1461        # 365*4+1    includes leap
-        # Shift the base so that day 0 is 1st Jan 0001, makes the year
-        # calculation easier
-        abs_day = abs_day - 1
+        # Shift the base so that day 0 is 1st Jan 0000, makes the
+        # calculation easier (year 0 is leap!)
+        abs_day = abs_day + 365
         # All quad centuries are equal
         abs_year = 400 * (abs_day // quad_century)
         abs_day = abs_day % quad_century
+        # the first century of a quad century is one day longer than expected
+        if abs_day > century:
+            abs_day -= (century + 1)
+            abs_year += 100
+            abs_year = abs_year + 100 * (abs_day // century)
+            abs_day = abs_day % century
+            carry_leap = False
+            # the first quad year of a century is one day shorter than
+            # expected
+            if abs_day >= (quad_year - 1):
+                abs_day -= (quad_year - 1)
+                abs_year += 4
+                abs_year = abs_year + 4 * (abs_day // quad_year)
+                abs_day = abs_day % quad_year
+                carry_leap = True
+        else:
+            carry_leap = True
+            abs_year = abs_year + 4 * (abs_day // quad_year)
+            abs_day = abs_day % quad_year
+        if carry_leap:
+            # the first year of a quad year is one day longer than expected
+            if abs_day > 365:
+                abs_day -= 366
+                abs_year += 1
+                abs_year = abs_year + (abs_day // 365)
+                abs_day = abs_day % 365
+        else:
+            # no leap during this quad year
+            abs_year = abs_year + (abs_day // 365)
+            abs_day = abs_day % 365
+        bce, c, y = self.split_year(abs_year)
+        self._set_from_ordinal_day(bce, c, y, abs_day + 1, xdigits=xdigits)
+        """
         # A quad century has one more day than 4 centuries because it
         # ends in a leap year We must check for this case specially to
         # stop abother 4 complete centuries being added!
@@ -291,8 +404,9 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
         abs_year = abs_year + 1
         # Finally, restore the base so that 1 is the 1st of Jan for
         # setting the ordinal
-        self._set_from_ordinal_day(abs_year // 100, abs_year % 100,
-                                   abs_day + 1)
+        bce, c, y = self.split_year(abs_year)
+        self._set_from_ordinal_day(bce, c, y, abs_day + 1, xdigits=xdigits)
+        """
 
     def get_absolute_day(self):
         """Return a notional day number
@@ -301,25 +415,60 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
         calendar."""
         if not self.complete():
             raise DateTimeError("absolute day requires complete date")
-        abs_year = self.century * 100 + self.year - 1
-        return (abs_year // 4) - (abs_year // 100) + (abs_year // 400) + \
-            (abs_year * 365) + self.get_ordinal_day()[2]
+        quad_century = 146097   # 365*400+97 always holds
+        century = 36524         # 365*100+24 excludes centennial leap
+        quad_year = 1461        # 365*4+1    includes leap
+        abs_year = self._year()
+        abs_day = (abs_year // 400) * quad_century
+        abs_year = abs_year % 400
+        if abs_year >= 100:
+            # first century longer than expected
+            abs_day += century + 1
+            abs_year -= 100
+            abs_day += (abs_year // 100) * century
+            abs_year = abs_year % 100
+            if abs_year >= 4:
+                # first quad of the century shorter than expected
+                abs_day += quad_year - 1
+                abs_year -= 4
+                carry_leap = True
+            else:
+                carry_leap = False
+        else:
+            carry_leap = True
+        abs_day += (abs_year // 4) * quad_year
+        abs_year = abs_year % 4
+        if carry_leap:
+            # first year longer than expected
+            if abs_year > 0:
+                abs_day += 366
+                abs_year -= 1
+                abs_day += abs_year * 365
+        else:
+            abs_day += abs_year * 365
+        # abs_day now correct for day 0 = 0000-01-01
+        return abs_day - 366 + self.get_xordinal_day()[3]
 
-    def _set_from_calendar_day(self, century, year, month, day, base=None):
+    def _set_from_calendar_day(
+            self, bce, century, year, month, day, base=None, xdigits=None):
+        self.xdigits = xdigits if base is None else base.xdigits
         self.week = None
         if century is None:
             # Truncation level>=1
-            if base is None or not base.complete():
+            if xdigits is not None:
+                raise DateTimeError("truncated date with expansion")
+            elif base is None or not base.complete():
                 raise DateTimeError("truncated date with no base")
             else:
-                baseCentury, base_year, base_month, base_day = \
-                    base.get_calendar_day()
-                # adjust base precision
+                base_bce, base_century, base_year, base_month, base_day = \
+                    base.get_xcalendar_day()
+                # adjust base precision to match inputs
                 if day is None:
                     base_day = None
                     if month is None:
                         base_month = None
-            self.century = baseCentury
+            self.bce = base_bce
+            self.century = base_century
             if year is None:
                 # Truncation level>=2
                 self.year = base_year
@@ -327,7 +476,8 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
                     # Truncation level>=3
                     self.month = base_month
                     if day is None:
-                        raise ValueError
+                        raise DateTimeError(
+                            "Truncated forms required at least one field")
                     else:
                         self.day = day
                         if self.day < base_day:
@@ -343,29 +493,36 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
                 self.year = year
                 self.month = month
                 self.day = day
-                if (self.year < base_year or
-                        (self.year == base_year and self.month is not None and
+                y = self._year()
+                ybase = base._year()
+                if (y < ybase or
+                        (y == ybase and self.month is not None and
                          (self.month < base_month or
                           (self.month == base_month and
                            self.day is not None and self.day < base_day)))):
                     self._add_century()
         else:
+            self.bce = bce and bool(century or year)
             self.century = century
             self.year = year
             self.month = month
             self.day = day
 
     def _add_century(self):
-        if self.century >= 99:
-            raise ValueError
-        self.century += 1
+        # strange case, e.g., -0098 goes to +0098, not +0002 or -0198!
+        if self.bce:
+            if self.century:
+                self.century -= 1
+            else:
+                self.bce = False
+        else:
+            self.century += 1
+        self._check_century_range()
 
     def _add_year(self):
-        if self.year >= 99:
-            self.year = 0
-            self._add_century()
-        else:
-            self.year += 1
+        y = self._year()
+        self.bce, self.century, self.year = self.split_year(y + 1)
+        self._check_century_range()
 
     def _add_month(self):
         if self.month >= 12:
@@ -375,32 +532,44 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
             self.month += 1
 
     def get_calendar_day(self):
-        """Returns a tuple of: (century,year,month,day)"""
+        """Returns a tuple of: (century, year, month, day)"""
+        year = self._year()
+        if self.bce or (year is not None and (year < 1 or year > 9999)):
+            raise DateTimeError("Use get_xcalendar_day for extended dates")
         return (self.century, self.year, self.month, self.day)
 
-    def _set_from_ordinal_day(self, century, year, ordinal_day, base=None):
+    def get_xcalendar_day(self):
+        """Returns a tuple of: (bce, century, year, month, day)"""
+        return (self.bce, self.century, self.year, self.month, self.day)
+
+    def _set_from_ordinal_day(self, bce, century, year, ordinal_day, base=None,
+                              xdigits=None):
+        self.xdigits = xdigits if base is None else base.xdigits
         self.week = None
         if century is None:
             if base is None or not base.complete():
                 raise DateTimeError("truncated date with no base")
             else:
-                baseCentury, base_year, baseOrdinalDay = \
-                    base.get_ordinal_day()
-            self.century = baseCentury
+                base_bce, base_century, base_year, base_ordinal_day = \
+                    base.get_xordinal_day()
+            self.bce = base_bce
+            self.century = base_century
             if year is None:
                 # Truncation level==2
                 self.year = base_year
                 self.day = ordinal_day
-                if self.day < baseOrdinalDay:
+                if self.day < base_ordinal_day:
                     self._add_year()
             else:
                 self.year = year
                 self.day = ordinal_day
-                if (self.year < base_year or
-                        (self.year == base_year and
-                         self.day < baseOrdinalDay)):
+                y = self._year()
+                ybase = base._year()
+                if (y < ybase or
+                        (y == ybase and self.day < base_ordinal_day)):
                     self._add_century()
         else:
+            self.bce = bce
             self.century = century
             self.year = year
             self.day = ordinal_day
@@ -417,10 +586,17 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
                 break
 
     def get_ordinal_day(self):
+        """Returns a tuple of (century, year, ordinal_day)"""
+        bce, century, year, ordinal_day = self.get_xordinal_day()
+        if bce:
+            raise DateTimeError("Use get_xordinal_day for BCE dates")
+        return century, year, ordinal_day
+
+    def get_xordinal_day(self):
         """Returns a tuple of (century,year,ordinal_day)"""
         if self.day is None:
             if self.month is None and self.week is None:
-                return (self.century, self.year, None)
+                return (self.bce, self.century, self.year, None)
             else:
                 raise DateTimeError(
                     "can't get ordinal day with month or week precision")
@@ -431,10 +607,11 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
         ordinal_day = self.day
         for m in msizes[:self.month - 1]:
             ordinal_day = ordinal_day + m
-        return (self.century, self.year, ordinal_day)
+        return (self.bce, self.century, self.year, ordinal_day)
 
-    def _set_from_week_day(self, century, decade, year, week, weekday,
-                           base=None):
+    def _set_from_week_day(self, bce, century, decade, year, week, weekday,
+                           base=None, xdigits=None):
+        self.xdigits = xdigits if base is None else base.xdigits
         if weekday is None:
             if week is None:
                 raise DateTimeError(
@@ -455,60 +632,63 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
             if base is None or not base.complete():
                 raise DateTimeError("truncated date with no base")
             else:
-                baseCentury, baseDecade, base_year, baseWeek, base_weekday = \
-                    base.get_week_day()
+                base_bce, base_century, base_decade, base_year, base_week, \
+                    base_weekday = base.get_xweek_day()
                 # adjust base precision
                 if weekday is None:
                     base_weekday = None
-            self.century = baseCentury
+            self.bce = base_bce
+            self.century = base_century
             if decade is None:
                 if year is None:
-                    self.year = baseDecade * 10 + base_year
+                    self.year = base_decade * 10 + base_year
                     if week is None:
-                        self.week = baseWeek
+                        self.week = base_week
                         self.day = weekday
                         if self.day is not None and self.day < base_weekday:
                             self._add_week()
                     else:
                         self.week = week
                         self.day = weekday
-                        if (self.week < baseWeek or
-                                (self.week == baseWeek and
+                        if (self.week < base_week or
+                                (self.week == base_week and
                                  self.day is not None and
                                  self.day < base_weekday)):
                             self._add_year()
                 else:
-                    self.year = year
+                    self.year = base_decade * 10 + year
                     self.week = week
                     self.day = weekday
-                    if (self.year < base_year or
-                            (self.year == base_year and
-                             (self.week < baseWeek or
-                              (self.week == baseWeek and
+                    y = self._year()
+                    ybase = base._year()
+                    if (y < ybase or
+                            (y == ybase and
+                             (self.week < base_week or
+                              (self.week == base_week and
                                self.day is not None and
                                self.day < base_weekday)))):
-                        self.year += (baseDecade + 1) * 10
-                    else:
-                        self.year += baseDecade * 10
+                        self._add_decade()
             else:
                 self.year = decade * 10 + year
                 self.week = week
                 self.day = weekday
-                base_year += baseDecade * 10
-                if (self.year < base_year or
-                        (self.year == base_year and
-                         (self.week < baseWeek or
-                          (self.week == baseWeek and self.day is not None and
+                y = self._year()
+                ybase = base._year()
+                if (y < ybase or
+                        (y == ybase and
+                         (self.week < base_week or
+                          (self.week == base_week and self.day is not None and
                            self.day < base_weekday)))):
                     self._add_century()
         else:
+            self.bce = bce
             self.century = century
             self.year = decade * 10 + year
             self.week = week
             self.day = weekday
         if self.day is not None:
             # We must convert to calendar form
-            year = self.century * 100 + self.year
+            year = self._year()
             if self.week > week_count(year):
                 raise DateTimeError(
                     "bad week %i for year %i" % (self.week, year))
@@ -542,35 +722,59 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
                     self.month = self.month + 1
                 else:
                     break
-            self.century = year // 100
-            self.year = year % 100
+            self.bce, self.century, self.year = self.split_year(year)
             self.week = None
 
+    def _add_decade(self):
+        # strange case, e.g., -0008 goes to +0008, not +0002 or -0018!
+        decade = self.year // 10
+        year = self.year % 10
+        if self.bce:
+            if decade:
+                decade -= 1
+            else:
+                self.bce = False
+        else:
+            decade += 1
+            if decade >= 10:
+                self.century += 1
+                decade = decade % 10
+        self.year = decade * 10 + year
+        self._check_century_range()
+
     def _add_week(self):
-        if self.week >= week_count(self.century * 100 + self.year):
+        if self.week >= week_count(self._year()):
             self.week = 1
             self._add_year()
         else:
             self.week += 1
 
     def get_week_day(self):
-        """Returns a tuple of (century,decade,year,week,weekday), note
+        """Returns a tuple of (century, decade, year, week, weekday), note
         that Monday is 1 and Sunday is 7"""
+        bce, century, decade, year, week, weekday = self.get_xweek_day()
+        if bce:
+            raise DateTimeError("Use get_xweek_day for BCE dates")
+        return century, decade, year, week, weekday
+
+    def get_xweek_day(self):
+        """Returns a tuple of (bce, century, decade, year, week, weekday),
+        note that Monday is 1 and Sunday is 7"""
         if self.day is None:
             if self.week:
-                return (self.century, self.year // 10, self.year % 10,
-                        self.week, None)
+                return (self.bce, self.century, self.year // 10,
+                        self.year % 10, self.week, None)
             elif self.month is None:
                 if self.year is None:
-                    return (self.century, None, None, None, None)
+                    return (self.bce, self.century, None, None, None, None)
                 else:
-                    return (self.century, self.year // 10, self.year % 10,
-                            None, None)
+                    return (self.bce, self.century, self.year // 10,
+                            self.year % 10, None, None)
             else:
                 raise DateTimeError("can't get week day with month precision")
         else:
-            century, year, ordinal_day = self.get_ordinal_day()
-            year += century * 100
+            ordinal_day = self.get_xordinal_day()[3]
+            year = self._year()
             if leap_year(year):
                 year_length = 366
             else:
@@ -596,7 +800,22 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
                 # that week
                 year_base = 5 - day_of_week(year, 1, 4)
                 week = (ordinal_day - year_base) // 7 + 1
-            return year // 100, (year % 100) // 10, (year % 10), week, weekday
+            bce, c, y = self.split_year(year)
+            return bce, c, y // 10, y % 10, week, weekday
+
+    def expand(self, xdigits):
+        """Constructs a new expanded instance
+
+        The purpose of this method is to create a new instance from an
+        existing Date but with a different expansion (value of xdigits).
+
+        The resulting value must still satisfy the constraints imposed
+        by the new xdigits value.  In particular, if you pass
+        xdigits=None the new instance will not be expanded and must be
+        in the range 0001-01-01 to 9999-12-31."""
+        return self.__class__(
+            bce=self.bce, century=self.century, year=self.year,
+            month=self.month, week=self.week, day=self.day, xdigits=xdigits)
 
     @classmethod
     def from_struct_time(cls, t):
@@ -609,11 +828,11 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
         fields of t, a struct_time, to match the values in this date."""
         if not self.complete():
             raise DateTimeError("update_struct_time requires complete date")
-        t[0] = self.century * 100 + self.year
+        t[0] = self._year()
         t[1] = self.month
         t[2] = self.day
         t[6] = self.get_week_day()[4] - 1
-        t[7] = self.get_ordinal_day()[2]
+        t[7] = self.get_xordinal_day()[3]
 
     @classmethod
     def from_now(cls):
@@ -643,20 +862,23 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
 
         Dates with year precision can be offset by years or centuries
         and, for completeness, dates with century precision can only be
-        offset by centuries."""
+        offset by centuries.
+
+        Creating an offset date from an expanded date always results in
+        another expanded date (with the same xdigits value)."""
         precision = self.get_precision()
         if precision == Precision.Complete:
             if not months and not years and not centuries:
                 base_day = self.get_absolute_day()
                 base_day += days + 7 * weeks
-                return type(self)(absolute_day=base_day)
+                return type(self)(absolute_day=base_day, xdigits=self.xdigits)
             else:
                 raise DateTimeError("offset incompatible with complete date")
         elif precision == Precision.Week:
             if not days and not months and not years and not centuries:
                 week = self.week + weeks
                 # years don't have regular numbers of weeks
-                year = self.year + 100 * self.century
+                year = self._year()
                 while True:
                     if week < 1:
                         year = year - 1
@@ -669,12 +891,11 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
                             year += 1
                         else:
                             break
-                century = year // 100
-                year = year % 100
+                bce, century, year = self.split_year(year)
                 decade = year // 10
                 year = year % 10
-                return type(self)(century=century, decade=decade, year=year,
-                                  week=week)
+                return type(self)(bce=bce, century=century, decade=decade,
+                                  year=year, week=week, xdigits=self.xdigits)
             else:
                 raise DateTimeError("offset incompatible with week precision")
         elif precision == Precision.Month:
@@ -683,37 +904,36 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
                 if month > 12 or month < 1:
                     years += (month - 1) // 12
                     month = (month - 1) % 12 + 1
-                year = self.year + years
-                if year > 99 or year < 0:
-                    centuries += year // 100
-                    year = year % 100
-                century = self.century + centuries
-                return type(self)(century=century, year=year, month=month)
+                year = self._year() + years
+                bce, century, year = self.split_year(year)
+                return type(self)(bce=bce, century=century + centuries,
+                                  year=year, month=month, xdigits=self.xdigits)
             else:
                 raise DateTimeError("offset incompatible with month precision")
         elif precision == Precision.Year:
             if not days and not weeks and not months:
-                year = self.year + years
-                if year > 99 or year < 0:
-                    centuries += year // 100
-                    year = year % 100
-                century = self.century + centuries
-                return type(self)(century=century, year=year)
+                year = self._year() + years
+                bce, century, year = self.split_year(year)
+                return type(self)(bce=bce, century=century + centuries,
+                                  year=year, xdigits=self.xdigits)
             else:
                 raise DateTimeError("offset incompatible with year precision")
 
     @classmethod
-    def from_str(cls, src, base=None):
+    def from_str(cls, src, base=None, xdigits=None):
         """Parses a :py:class:`Date` instance from a *src* string."""
         if is_text(src):
             p = ISO8601Parser(src)
-            d, dFormat = p.parse_date_format(base)
+            if xdigits is None:
+                d, dFormat = p.parse_date_format(base)
+            else:
+                d, dFormat = p.require_xdate_format(xdigits)
         else:
             raise TypeError
         return d
 
     @classmethod
-    def from_string_format(cls, src, base=None):
+    def from_string_format(cls, src, base=None, xdigits=None):
         """Similar to :py:meth:`from_str` except that a tuple is
         returned, the first item is the resulting :py:class:`Date`
         instance, the second is a string describing the format parsed.
@@ -723,7 +943,10 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
                         # f is set to "YYYY-MM-DD". """
         if is_text(src):
             p = ISO8601Parser(src)
-            return p.parse_date_format(base)
+            if xdigits is None:
+                return p.parse_date_format(base)
+            else:
+                return p.require_xdate_format(xdigits)
         else:
             raise TypeError
 
@@ -731,21 +954,48 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
         return self.get_calendar_string()
 
     def __repr__(self):
-        if self.week is None:
-            return "Date(century=%s, year=%s, month=%s, day=%s)" % (
-                str(self.century), str(self.year), str(self.month),
-                str(self.day))
+        if self.bce:
+            bce = 'bce=True, '
         else:
-            return "Date(century=%s, decade=%s, year=%s, week=%s)" % (
-                str(self.century), str(self.year // 10), str(self.year % 10),
-                str(self.week))
+            bce = ''
+        if self.xdigits is None:
+            xdigits = ''
+        else:
+            xdigits = ", xdigits=%s" % str(self.xdigits)
+        if self.week is None:
+            return "Date(%scentury=%s, year=%s, month=%s, day=%s%s)" % (
+                bce, str(self.century), str(self.year), str(self.month),
+                str(self.day), xdigits)
+        else:
+            return "Date(%scentury=%s, decade=%s, year=%s, week=%s%s)" % (
+                bce, str(self.century), str(self.year // 10),
+                str(self.year % 10), str(self.week), xdigits)
+
+    def _century_format(self, basic):
+        if self.xdigits is None:
+            century_format = "%02i"
+        elif self.xdigits < 0:
+            if basic:
+                raise DateTimeError(
+                    "basic format incompatible with variable expanded dates")
+            if self.bce:
+                century_format = "-%02i"
+            else:
+                century_format = "%02i"
+        else:
+            if self.bce:
+                century_format = "-%%0%ii" % (self.xdigits + 2)
+            else:
+                century_format = "+%%0%ii" % (self.xdigits + 2)
+        return century_format
 
     def get_calendar_string(self, basic=False, truncation=NoTruncation):
         """Formats this date using calendar form, for example 1969-07-20
 
         *basic*
-            True/False, selects basic form, e.g., 19690720.  Default
-            is False
+            True/False, selects basic form, e.g., 19690720.  Default is
+            False.  Expanded dates that use the non-conformant
+            xdigits=-1 mode are not compatible with basic formatting.
 
         *truncation*
             One of the :py:class:`Truncation` constants used to
@@ -753,8 +1003,9 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
             specify :py:attr:`Truncation.Year` you'll get --07-20 or
             --0720.  Default is :py:attr:`NoTruncation`.
 
-        Note that Calendar format only supports Century, Year and Month
-        truncated forms."""
+        Calendar format only supports Century, Year and Month truncated
+        forms."""
+        century_format = self._century_format(basic)
         if self.day is None:
             if self.month is None:
                 if self.week:
@@ -765,21 +1016,21 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
                         raise DateTimeError("no date to format")
                     else:
                         if truncation == NoTruncation:
-                            return "%02i" % self.century
+                            return century_format % self.century
                         else:
                             raise DateTimeError("More precision required")
                 else:
                     if truncation == NoTruncation:
-                        return "%02i%02i" % (self.century, self.year)
+                        return (century_format + "%02i") % (
+                            self.century, self.year)
                     elif truncation == Truncation.Century:
                         return "-%02i" % self.year
                     else:
                         raise DateTimeError("More precision required")
             else:
                 if truncation == NoTruncation:
-                    return "%02i%02i-%02i" % (self.century,
-                                              self.year,
-                                              self.month)
+                    return (century_format + "%02i-%02i") % (
+                        self.century, self.year, self.month)
                 elif truncation == Truncation.Century:
                     if basic:
                         return "-%02i%02i" % (self.year, self.month)
@@ -792,13 +1043,11 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
         else:
             if truncation == NoTruncation:
                 if basic:
-                    return "%02i%02i%02i%02i" % (
+                    return (century_format + "%02i%02i%02i") % (
                         self.century, self.year, self.month, self.day)
                 else:
-                    return "%02i%02i-%02i-%02i" % (self.century,
-                                                   self.year,
-                                                   self.month,
-                                                   self.day)
+                    return (century_format + "%02i-%02i-%02i") % (
+                        self.century, self.year, self.month, self.day)
             elif truncation == Truncation.Century:
                 if basic:
                     return "%02i%02i%02i" % (self.year, self.month, self.day)
@@ -829,16 +1078,19 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
 
         Note that ordinal format only supports century and year
         truncated forms."""
-        century, year, ordinal_day = self.get_ordinal_day()
+        century_format = self._century_format(basic)
+        bce, century, year, ordinal_day = self.get_xordinal_day()
         if ordinal_day is None:
             # same as for calendar strings
             return self.get_calendar_string(basic, truncation)
         else:
             if truncation == NoTruncation:
                 if basic:
-                    return "%02i%02i%03i" % (century, year, ordinal_day)
+                    return (century_format + "%02i%03i") % (
+                        century, year, ordinal_day)
                 else:
-                    return "%02i%02i-%03i" % (century, year, ordinal_day)
+                    return (century_format + "%02i-%03i") % (
+                        century, year, ordinal_day)
             elif truncation == Truncation.Century:
                 if basic:
                     return "%02i%03i" % (year, ordinal_day)
@@ -864,7 +1116,8 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
 
         Note that week format only supports century, decade, year and
         week truncated forms."""
-        century, decade, year, week, day = self.get_week_day()
+        century_format = self._century_format(basic)
+        bce, century, decade, year, week, day = self.get_xweek_day()
         if day is None:
             if week is None:
                 # same as the calendar string
@@ -872,9 +1125,11 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
             else:
                 if truncation == NoTruncation:
                     if basic:
-                        return "%02i%i%iW%02i" % (century, decade, year, week)
+                        return (century_format + "%i%iW%02i") % (
+                            century, decade, year, week)
                     else:
-                        return "%02i%i%i-W%02i" % (century, decade, year, week)
+                        return (century_format + "%i%i-W%02i") % (
+                            century, decade, year, week)
                 elif truncation == Truncation.Century:
                     if basic:
                         return "%i%iW%02i" % (decade, year, week)
@@ -892,14 +1147,11 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
         else:
             if truncation == NoTruncation:
                 if basic:
-                    return "%02i%i%iW%02i%i" % (
+                    return (century_format + "%i%iW%02i%i") % (
                         century, decade, year, week, day)
                 else:
-                    return "%02i%i%i-W%02i-%i" % (century,
-                                                  decade,
-                                                  year,
-                                                  week,
-                                                  day)
+                    return (century_format + "%i%i-W%02i-%i") % (
+                        century, decade, year, week, day)
             elif truncation == Truncation.Century:
                 if basic:
                     return "%i%iW%02i%i" % (decade, year, week, day)
@@ -921,9 +1173,12 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
                 raise DateTimeError("Truncation error")
 
     @classmethod
-    def from_julian(cls, year, month, day):
+    def from_julian(cls, year, month, day, xdigits=None):
         """Constructs a :py:class:`Date` from a year, month and day
-        expressed in the Julian calendar."""
+        expressed in the Julian calendar.
+
+        If the year is 0 or negative you *must* provide a value for
+        xdigits in order to construct an expanded date."""
         if year % 4:
             msizes = MONTH_SIZES
         else:
@@ -931,7 +1186,8 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
         year -= 1
         for m in msizes[:month - 1]:
             day += m
-        return cls(absolute_day=(year // 4) + (year * 365) + day - 2)
+        return cls(absolute_day=(year // 4) + (year * 365) + day - 2,
+                   xdigits=xdigits)
 
     def get_julian_day(self):
         """Returns a tuple of: (year,month,day) representing the
@@ -970,18 +1226,48 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
                 break
         return (year, month, day)
 
+    def _year(self):
+        if self.century is None or self.year is None:
+            return None
+        result = self.century * 100 + self.year
+        if self.bce:
+            return -result
+        else:
+            return result
+
+    @staticmethod
+    def split_year(year):
+        """Static method that splits an integer year into a 3-tuple
+
+        Returns::
+
+            (bce, century, year)
+
+        Can be used as a convenience when constructing new instances::
+
+            int_year = -752
+            bce, century, year = Date.split_year(int_year)
+            d = Date(bce=bce, century=century, year=year, month=4, day=21,
+                     xdigits=2)
+            str(d) == "-000752-04-21"     # True
+        """
+        if year < 0:
+            year = -year
+            return True, year // 100, year % 100
+        else:
+            return False, year // 100, year % 100
+
     def _check_date(self):
         if self.century is None:
             raise DateTimeError("missing date")
-        if self.century < 0 or self.century > 99:
-            raise DateTimeError("century out of range %i" % self.century)
+        self._check_century_range()
         if self.year is None:
             return
         if self.year < 0 or self.year > 99:
             raise DateTimeError("year out of range %i" % self.year)
-        if self.year == 0 and self.century == 0:
+        if self.xdigits is None and self.year == 0 and self.century == 0:
             raise DateTimeError("illegal year 0000")
-        year = self.century * 100 + self.year
+        year = self._year()
         if self.week:
             # week form of date:
             if self.week < 1 or self.week > week_count(year):
@@ -1003,6 +1289,16 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
             if self.day < 1 or self.day > month_sizes[self.month - 1]:
                 raise DateTimeError(
                     "illegal day %i for month %i" % (self.day, self.month))
+
+    def _check_century_range(self):
+        if self.xdigits is None:
+            if self.century < 0 or self.century > 99:
+                raise DateTimeError("century out of range %i" % self.century)
+            if self.bce:
+                raise DateTimeError("BCE year requires expanded date format")
+        elif self.xdigits >= 0:
+            if self.century < 0 or self.century > 10 ** (self.xdigits + 2) - 1:
+                raise DateTimeError("century out of range %i" % self.century)
 
     def leap_year(self):
         """leap_year returns True if this date is (in) a leap year and
@@ -1047,82 +1343,20 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
         else:
             return Precision.Complete
 
+    def sortkey(self):
+        return (not self.bce, self.century, self.year, self.month, self.week,
+                self.day)
+
+    def otherkey(self, other):
+        if is_string(other):
+            other = self.from_str(other)
+        if isinstance(other, self.__class__):
+            if self.get_precision() == other.get_precision():
+                return other.sortkey()
+        return NotImplemented
+
     def __hash__(self):
-        return hash((self.century, self.year, self.month, self.week, self.day))
-
-    def _check_comparison(self, other):
-        if not isinstance(other, Date):
-            raise TypeError
-        if self.get_precision() != other.get_precision():
-            raise ValueError(
-                "Incompatible precision for comparison: " + str(other))
-
-    def __eq__(self, other):
-        self._check_comparison(other)
-        return self.century == other.century and \
-            self.year == other.year and \
-            self.month == other.month and \
-            self.week == other.week and \
-            self.day == other.day
-
-    def __lt__(self, other):
-        self._check_comparison(other)
-        if self.century == other.century:
-            if self.year == other.year:
-                if self.month is not None:
-                    if self.month == other.month:
-                        return self.day is not None and self.day < other.day
-                    else:
-                        return self.month < other.month
-                elif self.week is not None:
-                    if self.week == other.week:
-                        return self.day is not None and self.day < other.day
-                    else:
-                        return self.week < other.week
-                else:
-                    return False
-            return self.year is not None and self.year < other.year
-        else:
-            return self.century < other.century
-
-    def __le__(self, other):
-        self._check_comparison(other)
-        if self.century == other.century:
-            if self.year == other.year:
-                if self.month is not None:
-                    if self.month == other.month:
-                        return self.day is not None and self.day <= other.day
-                    else:
-                        return self.month < other.month
-                elif self.week is not None:
-                    if self.week == other.week:
-                        return self.day is not None and self.day <= other.day
-                    else:
-                        return self.week < other.week
-                else:
-                    return False
-            else:
-                return self.year is not None and self.year < other.year
-        else:
-            return self.century < other.century
-
-#     def __cmp__(self, other):
-#         if not isinstance(other, Date):
-#             raise TypeError
-#         if self.get_precision() != other.get_precision():
-#             raise ValueError(
-#                 "Incompatible precision for comparison: " + str(other))
-#         result = cmp(self.century, other.century)
-#         if not result:
-#             result = cmp(self.year, other.year)
-#             if not result:
-#                 if self.month is not None:
-#                     result = cmp(self.month, other.month)
-#                     if not result:
-#                         result = cmp(self.day, other.day)
-#                 elif self.week is not None:
-#                     result = cmp(self.week, other.week)
-#         return result
+        return hash(self.sortkey())
 
     def set_from_date(self, src):
         raise DateTimeError(
@@ -1223,7 +1457,7 @@ class Date(PEP8Compatibility, CmpMixin, UnicodeMixin):
             "d = d.offset(days=dd)")
 
 
-class Time(PEP8Compatibility, UnicodeMixin, CmpMixin):
+class Time(PEP8Compatibility, UnicodeMixin, SortableMixin):
 
     """A class for representing ISO times
 
@@ -1386,7 +1620,7 @@ class Time(PEP8Compatibility, UnicodeMixin, CmpMixin):
     def get_zone(self):
         """Returns a tuple of::
 
-        (zdirection,zoffset)
+        (zdirection, zoffset)
 
         zdirection is defined as per Time's constructor, zoffset is a
         non-negative integer minute offset or None, if the zone is
@@ -1506,15 +1740,24 @@ class Time(PEP8Compatibility, UnicodeMixin, CmpMixin):
         and an offset number of hours, minutes and or seconds.
 
         The time zone is always copied (if present).  The result is a
-        tuple of (<Time instance>,overflow) where overflow is 0 or 1
-        indicating whether or not the time overflowed.  For example::
+        tuple of (<Time instance>,overflow) where overflow is the number
+        of days by which the time overflowed.  For example::
 
             # set base to 20:17:40Z
             base = Time(hour=20, minute=17, second=40, zdirection=0)
             t, overflow = base.offset(minutes=37)
             # t is 20:54:40Z, overflow is 0
             t, overflow = base.offset(hours=4, minutes=37)
-            # t is 00:54:40Z, overflow is 1"""
+            # t is 00:54:40Z, overflow is 1
+
+        Reduced precision times can still be offset but only by matching
+        arguments.  In other words, if the time has minute precision
+        then you may not pass a non-zero value for seconds, etc.  A
+        similar constraint applies to the passing of floating point
+        arguments.  You may pass a fractional offset for seconds if the
+        time has second precision but the minute and hour offsets must
+        be to integer precision.  Similarly, you may pass a fractional
+        offset for minutes if the time has minute precision, etc."""
         days = 0
         second = self.second
         if seconds:
@@ -1988,75 +2231,35 @@ class Time(PEP8Compatibility, UnicodeMixin, CmpMixin):
             raise DateTimeError("time overflow")
         if self.minute is None:
             return
-        if not isinstance(self.hour, int):
+        if isinstance(self.hour, float):
             raise DateTimeError("bad fractional hour %s" % str(self.hour))
         if self.minute < 0 or self.minute > 59:
             raise DateTimeError("minute out of range %s" % str(self.minute))
         if self.second is None:
             return
-        if not isinstance(self.minute, int):
+        if isinstance(self.minute, float):
             raise DateTimeError("bad fractional minute %s" % str(self.minute))
         if self.second < 0 or self.second >= 61:
             raise DateTimeError("second out of range %s" % str(self.second))
 
+    def sortkey(self):
+        z = self.get_zone_offset()
+        if z is None:
+            return (self.hour, self.minute, self.second)
+        else:
+            return (self.hour, self.minute, self.second, z)
+
+    def otherkey(self, other):
+        if is_string(other):
+            other = self.from_str(other)
+        if isinstance(other, self.__class__):
+            if self.get_precision() == other.get_precision() and \
+                    self.get_zone_offset() == other.get_zone_offset():
+                return other.sortkey()
+        return NotImplemented
+
     def __hash__(self):
-        return hash((self.hour, self.minute, self.second,
-                     self.get_zone_offset()))
-
-    def _check_compare(self, other):
-        if not isinstance(other, Time):
-            raise TypeError
-        if self.get_precision() != other.get_precision():
-            raise ValueError(
-                "Incompatible precision for comparison: " + str(other))
-        zdir = self.get_zone_offset()
-        other_zdir = other.get_zone_offset()
-        if zdir != other_zdir:
-            raise ValueError("Incompatible zone for comparison: " + str(other))
-
-    def __eq__(self, other):
-        self._check_compare(other)
-        return self.hour == other.hour and \
-            self.minute == other.minute and \
-            self.second == other.second
-
-    def __lt__(self, other):
-        self._check_compare(other)
-        if self.hour == other.hour:
-            if self.minute == other.minute:
-                return self.second is not None and self.second < other.second
-            else:
-                return self.minute is not None and self.minute < other.minute
-        else:
-            return self.hour < other.hour
-
-    def __le__(self, other):
-        self._check_compare(other)
-        if self.hour == other.hour:
-            if self.minute == other.minute:
-                return self.second is not None and self.second <= other.second
-            else:
-                return self.minute is not None and self.minute <= other.minute
-        else:
-            return self.hour < other.hour
-
-#     def __cmp__(self, other):
-#         if not isinstance(other, Time):
-#             raise TypeError
-#         if self.get_precision() != other.get_precision():
-#             raise ValueError(
-#                 "Incompatible precision for comparison: " + str(other))
-#         zdir = self.get_zone_offset()
-#         other_zdir = other.get_zone_offset()
-#         if zdir != other_zdir:
-#             raise ValueError("Incompatible zone for comparison: " +
-#                              str(other))
-#         result = cmp(self.hour, other.hour)
-#         if not result:
-#             result = cmp(self.minute, other.minute)
-#             if not result:
-#                 result = cmp(self.second, other.second)
-#         return result
+        return hash(self.sortkey())
 
     def set_origin(self):
         warnings.warn(
@@ -2210,14 +2413,14 @@ class Time(PEP8Compatibility, UnicodeMixin, CmpMixin):
         return overflow
 
 
-class TimePoint(PEP8Compatibility, UnicodeMixin, CmpMixin):
+class TimePoint(PEP8Compatibility, UnicodeMixin, SortableMixin):
 
     """A class for representing ISO timepoints
 
     TimePoints are constructed from a date and a time (which may or
     may not have a time zone), for example::
 
-        TimePoint(date=Date(year=1969,month=7,day=20),
+        TimePoint(date=Date(century=19,year=69,month=7,day=20),
                   time=Time(hour=20,minute=17,second=40,zdirection=0))
 
     If the date is missing then the date origin is used, Date() or
@@ -2226,7 +2429,7 @@ class TimePoint(PEP8Compatibility, UnicodeMixin, CmpMixin):
 
     Times may be given with reduced precision but the date must be
     complete. In other words, there is no such thing as a timepoint
-    with, month precision, use Date instead.
+    with, month precision, use Date instead.  Expanded dates may be used.
 
     When comparing TimePoint instances we deal with partially specified
     TimePoints in the same way as :class:`Time`.  However, unlike the
@@ -2259,29 +2462,66 @@ class TimePoint(PEP8Compatibility, UnicodeMixin, CmpMixin):
             raise TypeError("Can't construct TimePoint from %s" % repr(src))
 
     def get_calendar_time_point(self):
-        """Returns a tuple representing the calendar date
+        """Returns a tuple representing the calendar time point
 
         The result is::
 
-            (century, year, month, day, hour, minute, second)"""
+            (century, year, month, day, hour, minute, second)
+
+        This method cannot be used for expanded dates, use
+        :meth:`get_xcalendar_time_point` instead when dealing with dates
+        outside of the normal ISO 8601 range."""
         return self.date.get_calendar_day() + self.time.get_time()
 
-    def get_ordinal_time_point(self):
-        """Returns a tuple representing the ordinal date
+    def get_xcalendar_time_point(self):
+        """Returns a tuple representing an expanded calendar time point
 
         The result is::
 
-            (century, year, ordinal_day, hour, minute, second)"""
+            (bce, century, year, month, day, hour, minute, second)"""
+        return self.date.get_xcalendar_day() + self.time.get_time()
+
+    def get_ordinal_time_point(self):
+        """Returns a tuple representing the ordinal time point
+
+        The result is::
+
+            (century, year, ordinal_day, hour, minute, second)
+
+        This method cannot be used for expanded dates, use
+        :meth:`get_xordinal_time_point` instead when dealing with dates
+        outside of the normal ISO 8601 range."""
         return self.date.get_ordinal_day() + self.time.get_time()
 
+    def get_xordinal_time_point(self):
+        """Returns a tuple representing an expanded ordinal time point
+
+        The result is::
+
+            (bce, century, year, ordinal_day, hour, minute, second)"""
+        return self.date.get_xordinal_day() + self.time.get_time()
+
     def get_week_day_time_point(self):
-        """Returns a tuple representing the week day
+        """Returns a tuple representing the week-day time point
 
         The result is::
 
             (century, decade, year, week, weekday, hour, minute,
-             second)"""
+             second)
+
+        This method cannot be used for expanded dates, use
+        :meth:`get_xweek_day_time_point` instead when dealing with dates
+        outside of the normal ISO 8601 range."""
         return self.date.get_week_day() + self.time.get_time()
+
+    def get_xweek_day_time_point(self):
+        """Returns a tuple representing an expanded week-day time point
+
+        The result is::
+
+            (bce, century, decade, year, week, weekday, hour, minute,
+             second)"""
+        return self.date.get_xweek_day() + self.time.get_time()
 
     def get_zone(self):
         """Returns a tuple representing the zone
@@ -2290,6 +2530,18 @@ class TimePoint(PEP8Compatibility, UnicodeMixin, CmpMixin):
 
         See :py:meth:`Time.get_zone` for details."""
         return self.time.get_zone()
+
+    def expand(self, xdigits):
+        """Constructs a new expanded instance
+
+        The purpose of this method is to create a new instance from an
+        existing TimePoint but with a different date expansion (value of
+        xdigits).
+
+        This is equivalent to::
+
+            TimePoint(date=self.date.expand(xdigits), time=self.time)"""
+        return self.__class__(date=self.date.expand(xdigits), time=self.time)
 
     def with_zone(self, zdirection, zhour=None, zminute=None, **kwargs):
         """Constructs a :py:class:`TimePoint` instance from an existing
@@ -2340,18 +2592,22 @@ class TimePoint(PEP8Compatibility, UnicodeMixin, CmpMixin):
                    time=Time.from_struct_time(t))
 
     @classmethod
-    def from_str(cls, src, base=None, tdesignators="T"):
+    def from_str(cls, src, base=None, tdesignators="T", xdigits=None):
         """Constructs a TimePoint from a string representation.
         Truncated forms are parsed with reference to *base*."""
         if is_text(src):
             p = ISO8601Parser(src)
-            tp, f = p.parse_time_point_format(base, tdesignators)
+            if xdigits is None:
+                tp, f = p.parse_time_point_format(base, tdesignators)
+            else:
+                tp, f = p.require_xtime_point_format(xdigits, tdesignators)
             return tp
         else:
             raise TypeError
 
     @classmethod
-    def from_string_format(cls, src, base=None, tdesignators="T", **kwargs):
+    def from_string_format(cls, src, base=None, tdesignators="T", xdigits=None,
+                           **kwargs):
         """Creates an instance from a string
 
         Similar to :py:meth:`from_str` except that a tuple is returned,
@@ -2364,7 +2620,10 @@ class TimePoint(PEP8Compatibility, UnicodeMixin, CmpMixin):
         tdesignators = kwargs.get('tDesignators', tdesignators)
         if is_text(src):
             p = ISO8601Parser(src)
-            return p.parse_time_point_format(base, tdesignators)
+            if xdigits is None:
+                return p.parse_time_point_format(base, tdesignators)
+            else:
+                return p.require_xtime_point_format(xdigits, tdesignators)
         else:
             raise TypeError
 
@@ -2391,12 +2650,15 @@ class TimePoint(PEP8Compatibility, UnicodeMixin, CmpMixin):
             select truncated forms of the date.  For example, if you
             specify :py:attr:`Truncation.Year` you'll get
             --07-20T20:17:40 or --0720T201740.  Default is
-            :py:attr:`NoTruncation`.  Note that Calendar format only
+            :py:attr:`NoTruncation`.  Calendar format only
             supports Century, Year and Month truncated forms, the time
             component cannot be truncated.
 
         *ndp*, *dp* and *zone_precision*
-            As specified in :py:meth:`Time.get_string`"""
+            As specified in :py:meth:`Time.get_string`
+
+        If the instance is an expanded time point with xdigits=-1 then
+        basic format is not allowed."""
         zone_precision = kwargs.get('zonePrecision', zone_precision)
         tdesignator = kwargs.get('tDesignator', tdesignator)
         return (self.date.get_calendar_string(basic, truncation) +
@@ -2423,7 +2685,10 @@ class TimePoint(PEP8Compatibility, UnicodeMixin, CmpMixin):
             component cannot be truncated.
 
         *ndp*, *dp* and *zone_precision*
-            As specified in :py:meth:`Time.get_string`"""
+            As specified in :py:meth:`Time.get_string`
+
+        If the instance is an expanded time point with xdigits=-1 then
+        basic format is not allowed."""
         zone_precision = kwargs.get('zonePrecision', zone_precision)
         tdesignator = kwargs.get('tDesignator', tdesignator)
         return self.date.get_ordinal_string(basic, truncation) + tdesignator +\
@@ -2449,7 +2714,10 @@ class TimePoint(PEP8Compatibility, UnicodeMixin, CmpMixin):
             forms, the time component cannot be truncated.
 
         *ndp*, *dp* and *zone_precision*
-            As specified in :py:meth:`Time.get_string`"""
+            As specified in :py:meth:`Time.get_string`
+
+        If the instance is an expanded time point with xdigits=-1 then
+        basic format is not allowed."""
         zone_precision = kwargs.get('zonePrecision', zone_precision)
         tdesignator = kwargs.get('tDesignator', tdesignator)
         return self.date.get_week_string(basic, truncation) + tdesignator +\
@@ -2529,65 +2797,29 @@ class TimePoint(PEP8Compatibility, UnicodeMixin, CmpMixin):
             raise DateTimeError(
                 "timepoint requires complete precision for date")
 
-    def __hash__(self):
+    def sortkey(self):
         if self.time.get_zone_offset():
-            return hash(self.shift_zone(zdirection=0))
+            # force UTC for comparisons and hashing
+            return self.shift_zone(zdirection=0).sortkey()
         else:
             # no zone, or Zulu time
-            return hash((self.date, self.time))
+            return tuple(list(self.date.sortkey()) + list(self.time.sortkey()))
 
-    def _check_comparison(self, other):
-        if not isinstance(other, TimePoint):
-            other = type(self)(other)
-        # we need to follow the rules for comparing times
-        if self.time.get_precision() != other.time.get_precision():
-            raise ValueError(
-                "Incompatible precision for comparison: " + str(other))
-        z1 = self.time.get_zone_offset()
-        z2 = other.time.get_zone_offset()
-        if z1 != z2:
-            if z1 is None or z2 is None:
-                raise ValueError("Can't compare zone: " + str(other))
-            # we need to change the timezone of other to match ours
-            other = other.shift_zone(*self.time.get_zone3())
-        return other
+    def otherkey(self, other):
+        if is_string(other):
+            other = self.from_str(other)
+        if isinstance(other, self.__class__):
+            if self.get_precision() == other.get_precision():
+                zself = self.time.get_zone_offset()
+                zother = other.time.get_zone_offset()
+                if (zself is None) ^ (zother is None):
+                    # can't compare a time with a zone with one without
+                    return NotImplemented
+                return other.sortkey()
+        return NotImplemented
 
-    def __eq__(self, other):
-        other = self._check_comparison(other)
-        return self.date == other.date and self.time == other.time
-
-    def __lt__(self, other):
-        other = self._check_comparison(other)
-        if self.date == other.date:
-            return self.time < other.time
-        else:
-            return self.date < other.date
-
-    def __le__(self, other):
-        other = self._check_comparison(other)
-        if self.date == other.date:
-            return self.time <= other.time
-        else:
-            return self.date < other.date
-
-#     def __cmp__(self, other):
-#         if not isinstance(other, TimePoint):
-#             other = type(self)(other)
-# we need to follow the rules for comparing times
-#         if self.time.get_precision() != other.time.get_precision():
-#             raise ValueError(
-#                 "Incompatible precision for comparison: " + str(other))
-#         z1 = self.time.get_zone_offset()
-#         z2 = other.time.get_zone_offset()
-#         if z1 != z2:
-#             if z1 is None or z2 is None:
-#                 raise ValueError("Can't compare zone: " + str(other))
-# we need to change the timezone of other to match ours
-#             other = other.shift_zone(*self.time.get_zone3())
-#         result = cmp(self.date, other.date)
-#         if not result:
-#             result = cmp(self.time, other.time)
-#         return result
+    def __hash__(self):
+        return hash(self.sortkey())
 
     def set_origin(self):
         warnings.warn(
@@ -2723,7 +2955,7 @@ class TimePoint(PEP8Compatibility, UnicodeMixin, CmpMixin):
         return self.set_from_time_point(t)
 
 
-class Duration(PEP8Compatibility):
+class Duration(UnicodeMixin, PEP8Compatibility):
 
     """A class for representing ISO durations"""
 
@@ -2737,6 +2969,9 @@ class Duration(PEP8Compatibility):
             self.set_zero()
         else:
             raise TypeError
+
+    def __unicode__(self):
+        return to_text(self.get_string())
 
     def set_zero(self):
         self.years = 0
@@ -2782,7 +3017,7 @@ class Duration(PEP8Compatibility):
         else:
             raise TypeError
 
-    def get_string(self, truncate_zeros=0, ndp=0):
+    def get_string(self, truncate_zeros=0, ndp=0, dp=','):
         if self.weeks is None:
             components = list(self.get_calender_duration())
             while components[-1] is None:
@@ -2800,22 +3035,22 @@ class Duration(PEP8Compatibility):
                     components[i] = ""
                     continue
                 if isinstance(value, float):
-                    fraction, value = modf(value)
-                    value = int(value)
-                    if ndp:
-                        # to prevent truncation being caught out by
-                        # sloppy machine rounding we add a small time to
-                        # the fraction (at most 1ns and typically less)
-                        if ndp > 0:
-                            fraction_str = "%i,%0*i"
-                        else:
-                            fraction_str = "%i.%0*i"
-                            ndp = -ndp
-                        fraction += 2e-13
-                        fraction = int(floor(fraction * float(10 ** ndp)))
-                        components[i] = fraction_str % (value, ndp, fraction)
+                    if ndp is None:
+                        f = decimal.Decimal(str(value)).quantize(
+                            decimal.Decimal('1.' + '0' * 6),
+                            rounding=decimal.ROUND_DOWN)
+                        components[i] = str(f).rstrip('.0')
                     else:
-                        components[i] = str(value)
+                        if ndp < 0:
+                            # shorthand for '.'
+                            dp = '.'
+                            ndp = -ndp
+                        f = decimal.Decimal(str(value)).quantize(
+                            decimal.Decimal('1.' + '0' * ndp),
+                            rounding=decimal.ROUND_DOWN)
+                        components[i] = str(f)
+                    if dp == ',':
+                        components[i] = components[i].replace('.', ',')
                 else:
                     components[i] = str(value)
                 components[i] = components[i] + "YMDHMS"[i]
@@ -2826,7 +3061,14 @@ class Duration(PEP8Compatibility):
             else:
                 return 'P' + date_part
         else:
-            pass
+            if isinstance(self.weeks, float):
+                f = decimal.Decimal(str(self.weeks)).quantize(
+                    decimal.Decimal('1.' + '0' * ndp),
+                    rounding=decimal.ROUND_DOWN)
+                week_part = str(f) + 'W'
+            else:
+                week_part = str(self.weeks) + 'W'
+            return 'P' + week_part
 
     def set_from_duration(self, src):
         self.years = src.years
@@ -3012,8 +3254,15 @@ class ISO8601Parser(BasicParser):
             raise DateTimeError(
                 "iso8601 requires character source, not binary data")
 
+    def require_xtime_point_format(self, xdigits, tdesignators="T"):
+        d, df = self.require_xdate_format(xdigits)
+        return self.require_time_point_time_format(d, df, tdesignators)
+
     def parse_time_point_format(self, base=None, tdesignators="T"):
-        d, df = self.parse_date_format(base)
+        d, df = self.parse_date_format(None if base is None else base.date)
+        return self.require_time_point_time_format(d, df, tdesignators)
+
+    def require_time_point_time_format(self, d, df, tdesignators):
         if not d.complete():
             raise DateTimeError("incomplete date in time point %s" % str(d))
         if self.the_char not in tdesignators:
@@ -3024,9 +3273,19 @@ class ISO8601Parser(BasicParser):
             d = d.offset(days=overflow)
         # check that the date format and time format are compatible,
         # i.e., both either basic or extended
-        if not ((ExtendedTimeFormats.get(tf) and
-                 ExtendedDateFormats.get(df)) or
-                (BasicTimeFormats.get(tf) and BasicDateFormats.get(df))):
+        if d.xdigits is not None:
+            if d.xdigits < 0:
+                # only works with extended format
+                dext = True
+                dbasic = False
+            else:
+                dext = ExtendedDateFormats.get(df[d.xdigits + 1:]) is not None
+                dbasic = BasicDateFormats.get(df[d.xdigits + 1:]) is not None
+        else:
+            dext = ExtendedDateFormats.get(df)
+            dbasic = BasicDateFormats.get(df)
+        if not ((ExtendedTimeFormats.get(tf) and dext) or
+                (BasicTimeFormats.get(tf) and dbasic)):
             raise DateTimeError(
                 "inconsistent use of basic/extended form in time point "
                 "%s%s%s" % (df, tdesignator, tf))
@@ -3037,6 +3296,116 @@ class ISO8601Parser(BasicParser):
             "ISO8601Parser.parse_time_point no longer supported\n"
             "Replace: tformat = p.parse_time_point(d, base, 'T') with:\n"
             "         d, tformat = p.parse_time_point_format(base, 'T')")
+
+    def require_xdate_format(self, xdigits):
+        """Returns a tuple of (:py:class:`ExpandedDate`, string)
+
+        The second item in the tuple is a string representing the format
+        parsed which will be one of the expanded forms.
+
+        The number of expanded year digits must be specified and be
+        present exactly."""
+        sign = self.parse_one('+-')
+        if sign:
+            bce = sign == '-'
+        elif xdigits < 0:
+            bce = False
+            sign = ''
+        else:
+            self.parser_error("expanded date format")
+        century = 0
+        if xdigits < 0:
+            # in this mode we parse the entire year, must be in extended
+            # format as we won't stop until we run out digits.
+            ndigits = 0
+            while self.match_digit():
+                century = 10 * century + self.require_digit_value()
+                ndigits += 1
+            if ndigits < 4:
+                self.parser_error(
+                    "variable length expanded year with 4 or more digits")
+            year = century % 100
+            century = century // 100
+        else:
+            for i in range3(xdigits + 2):
+                century = 10 * century + self.require_digit_value()
+            year = None
+        xformat = sign + 'Y' * xdigits
+        if self.match_digit() or year is not None:
+            if year is None:
+                year = self.require_digit_value()
+                year = year * 10 + self.require_digit_value()
+            if self.match_digit():
+                v1 = self.require_digit_value()
+                v1 = v1 * 10 + self.require_digit_value()
+                v2 = self.require_digit_value()
+                if self.match_digit():
+                    v2 = v2 * 10 + self.require_digit_value()
+                    return (Date(bce=bce, century=century, year=year, month=v1,
+                                 day=v2, xdigits=xdigits),
+                            xformat + "YYYYMMDD")
+                else:
+                    return (Date(bce=bce, century=century, year=year,
+                                 ordinal_day=v1 * 10 + v2, xdigits=xdigits),
+                            xformat + "YYYYDDD")
+            elif self.the_char == "-":
+                self.next_char()
+                if self.match_digit():
+                    v1 = self.require_digit_value()
+                    v1 = v1 * 10 + self.require_digit_value()
+                    if self.match_digit():
+                        v1 = v1 * 10 + self.require_digit_value()
+                        return (Date(bce=bce, century=century, year=year,
+                                     ordinal_day=v1, xdigits=xdigits),
+                                xformat + "YYYY-DDD")
+                    elif self.the_char == "-":
+                        self.next_char()
+                        v2 = self.require_digit_value()
+                        v2 = v2 * 10 + self.require_digit_value()
+                        return (Date(bce=bce, century=century, year=year,
+                                     month=v1, day=v2, xdigits=xdigits),
+                                xformat + "YYYY-MM-DD")
+                    else:
+                        return (Date(bce=bce, century=century, year=year,
+                                     month=v1, xdigits=xdigits),
+                                xformat + "YYYY-MM")
+                elif self.the_char == "W":
+                    self.next_char()
+                    week = self.require_digit_value()
+                    week = week * 10 + self.require_digit_value()
+                    if self.the_char == "-":
+                        self.next_char()
+                        weekday = self.require_digit_value()
+                        return (Date(bce=bce, century=century,
+                                     decade=year // 10, year=year % 10,
+                                     week=week, weekday=weekday,
+                                     xdigits=xdigits), xformat + "YYYY-Www-D")
+                    else:
+                        return (Date(bce=bce, century=century,
+                                     decade=year // 10, year=year % 10,
+                                     week=week, xdigits=xdigits),
+                                xformat + "YYYY-Www")
+                else:
+                    self.parser_error("digit or W in ISO expanded date")
+            elif self.the_char == "W":
+                self.next_char()
+                week = self.require_digit_value()
+                week = week * 10 + self.require_digit_value()
+                if self.match_digit():
+                    weekday = self.require_digit_value()
+                    return (Date(bce=bce, century=century, decade=year // 10,
+                                 year=year % 10, week=week, weekday=weekday,
+                                 xdigits=xdigits), xformat + "YYYYWwwD")
+                else:
+                    return (Date(bce=bce, century=century, decade=year // 10,
+                                 year=v2 % 10, week=week, xdigits=xdigits),
+                            xformat + "YYYYWww")
+            else:
+                return (Date(bce=bce, century=century, year=year,
+                        xdigits=xdigits), xformat + "YYYY")
+        else:
+            return (Date(bce=bce, century=century, xdigits=xdigits),
+                    xformat + "YY")
 
     def parse_date_format(self, base=None):
         """Returns a tuple of (:py:class:`Date`, string).
@@ -3102,7 +3471,7 @@ class ISO8601Parser(BasicParser):
                                 century=v1, decade=v2 // 10, year=v2 %
                                 10, week=v3, base=base), "YYYY-Www"
                     else:
-                        self.BadSyntax("expected digit or W in ISO date")
+                        self.parser_error("digit or W in ISO date")
                 elif self.the_char == "W":
                     self.next_char()
                     v3 = self.require_digit_value()
@@ -3114,7 +3483,7 @@ class ISO8601Parser(BasicParser):
                             10, week=v3, weekday=v4, base=base), "YYYYWwwD"
                     else:
                         return (Date(century=v1, decade=v2 // 10, year=v2 % 10,
-                                     week=v3, base=base), "YYYYWww""")
+                                     week=v3, base=base), "YYYYWww")
                 else:
                     return Date(century=v1, year=v2, base=base), "YYYY"
             elif self.the_char == "-":
@@ -3134,8 +3503,7 @@ class ISO8601Parser(BasicParser):
                         return Date(
                             year=v1, month=v2, day=v3, base=base), "YY-MM-DD"
                     else:
-                        self.BadSyntax(
-                            "expected digit or hyphen in ISO date")
+                        self.parser_error("digit or hyphen in ISO date")
                 elif self.the_char == "W":
                     self.next_char()
                     v2 = self.require_digit_value()
@@ -3151,7 +3519,7 @@ class ISO8601Parser(BasicParser):
                             decade=v1 // 10, year=v1 %
                             10, week=v2, base=base), "YY-Www"
                 else:
-                    self.BadSyntax("expected digit or W in ISO date")
+                    self.parser_error("digit or W in ISO date")
             elif self.the_char == "W":
                 self.next_char()
                 v2 = self.require_digit_value()
@@ -3232,8 +3600,7 @@ class ISO8601Parser(BasicParser):
                     v1 = v1 * 10 + self.require_digit_value()
                     return Date(day=v1, base=base), "---DD"
                 else:
-                    self.BadSyntax(
-                        "expected digit or hyphen in truncated ISO date")
+                    self.parser_error("digit or hyphen in truncated ISO date")
             elif self.the_char == "W":
                 self.next_char()
                 if self.match_digit():
@@ -3253,13 +3620,11 @@ class ISO8601Parser(BasicParser):
                     v1 = self.require_digit_value()
                     return Date(weekday=v1, base=base), "-W-D"
                 else:
-                    self.BadSyntax(
-                        "expected digit or hyphen in truncated ISO date")
+                    self.parser_error("digit or hyphen in truncated ISO date")
             else:
-                self.BadSyntax(
-                    "expected digit, hyphen or W in truncated ISO date")
+                self.parser_error("digit, hyphen or W in truncated ISO date")
         else:
-            self.BadSyntax("expected digit or hyphen in ISO date")
+            self.parser_error("digit or hyphen in ISO date")
 
     def parse_date(self, date, base=None):
         raise DateTimeError(
@@ -3332,7 +3697,7 @@ class ISO8601Parser(BasicParser):
                 tformat = "hh"
         elif self.the_char == "-":
             if tdesignator:
-                self.BadSyntax("time designator T before truncated time")
+                self.parser_error("time designator T before truncated time")
             self.next_char()
             if self.match_digit():
                 v1 = self.require_digit_value()
@@ -3381,12 +3746,12 @@ class ISO8601Parser(BasicParser):
                     hour, minute, second = None, None, v1
                     tformat = "--ss"
             else:
-                self.BadSyntax("expected digit or hyphen in truncated Time")
+                self.parser_error("digit or hyphen in truncated Time")
             # truncated forms cannot take timezones, return early
             t, overflow = base.extend(hour=hour, minute=minute, second=second)
             return t, overflow, tformat
         else:
-            self.BadSyntax("expected digit or hyphen in Time")
+            self.parser_error("digit or hyphen in Time")
         if self.the_char is not None and self.the_char in "Z+-":
             # can't be truncated form
             zdirection, zhour, zminute, tzFormat = \
@@ -3565,7 +3930,7 @@ class ISO8601Parser(BasicParser):
 
     def parse_fraction(self):
         if not (self.the_char == "." or self.the_char == ","):
-            self.BadSyntax("expected decimal sign")
+            self.parser_error("decimal sign")
         self.next_char()
         f = 0
         fmag = 1
@@ -3573,7 +3938,7 @@ class ISO8601Parser(BasicParser):
             f = f * 10 + self.require_digit_value()
             fmag *= 10
         if fmag == 1:
-            self.BadSyntax("expected decimal digit")
+            self.parser_error("decimal digit")
         return float(f) / float(fmag)
 
     def require_digit_value(self):

@@ -1,162 +1,24 @@
 #! /usr/bin/env python
 
-from pyslet.py26 import *       # noqa
-
-import string
-import types
 import base64
-import threading
-import logging
-import io
-import os
-import zlib
 import errno
-from StringIO import StringIO
+import io
+import logging
+import os
+import threading
+import zlib
 
-import pyslet.rfc2396 as uri
-from pyslet.pep8 import PEP8Compatibility
-from pyslet.py2 import force_bytes
+from .. import rfc2396 as uri
+from ..pep8 import PEP8Compatibility
+from ..py2 import force_bytes, is_string, dict_keys
+from ..py26 import *    # noqa
+from ..streams import BufferedStreamWrapper, io_blocked, Pipe
 
-import grammar
-import params
-import auth
-import cookie
-
-
-if hasattr(errno, 'WSAEWOULDBLOCK'):
-    _blockers = set((errno.EAGAIN, errno.EWOULDBLOCK, errno.WSAEWOULDBLOCK))
-else:
-    _blockers = set((errno.EAGAIN, errno.EWOULDBLOCK))
+from . import grammar, params, auth, cookie
+from .grammar import SEMICOLON, COMMA, SOLIDUS, EQUALS_SIGN
 
 
-def io_blocked(err):
-    return err.errno in _blockers
-
-
-if hasattr(errno, 'WSAETIMEDOUT'):
-    _timeouts = set((errno.ETIMEDOUT, errno.WSAETIMEDOUT))
-else:
-    _timeouts = set((errno.ETIMEDOUT, ))
-
-
-def io_timedout(err):
-    return err.errno in _timeouts
-
-
-class BufferedEntityWrapper(io.RawIOBase):
-
-    """A buffered wrapper for file-like objects.
-
-    src
-        A file-like object, we only require a read method
-
-    buffsize
-        The maximum size of the internal buffer
-
-    On construction the src is read until an end of file condition is
-    encountered or until buffsize bytes have been read.  EOF is signaled
-    by an empty string returned by src's read method.  Instances then
-    behave like readable streams transparently reading from the buffer
-    or from the remainder of the src as applicable.
-
-    Instances behave differently depending on whether or not the entire
-    src is buffered.  If it is they become seekable and set a value for
-    the length attribute.  Otherwise they are not seekable and the
-    length attribute is None.
-
-    If src is a non-blocking data source and it becomes blocked,
-    indicated by read returning None rather than an empty string, then
-    the instance reverts to non-seekable behaviour."""
-
-    def __init__(self, src, buffsize=io.DEFAULT_BUFFER_SIZE):
-        self.src = src
-        self.buff = StringIO()
-        self.bsize = 0
-        self.overflow = False
-        self.length = None
-        while True:
-            nbytes = buffsize - self.bsize
-            if nbytes <= 0:
-                # we've run out of buffer space
-                self.overflow = True
-                break
-            data = src.read(nbytes)
-            if data is None:
-                # blocked, treat as overflow
-                self.overflow = True
-                break
-            elif data:
-                self.buff.write(data)
-                self.bsize += len(data)
-            else:
-                # EOF
-                break
-        self.pos = 0
-        self.buff.seek(0)
-        if not self.overflow:
-            self.length = self.bsize
-
-    def readable(self):
-        return True
-
-    def writable(self):
-        return False
-
-    def seekable(self):
-        return not self.overflow
-
-    def tell(self):
-        if self.overflow:
-            raise UnsupportedOperation
-        else:
-            return self.pos
-
-    def seek(self, offset, whence=io.SEEK_SET):
-        if self.overflow:
-            raise UnsupportedOperation
-        elif whence == io.SEEK_SET:
-            self.pos = offset
-        elif whence == io.SEEK_CUR:
-            self.pos += offset
-        elif whence == io.SEEK_END:
-            self.pos = self.length + offset
-        else:
-            raise ValueError("unrecognized whence value in seek: %s" %
-                             repr(whence))
-        self.buff.seek(self.pos)
-
-    def readinto(self, b):
-        if self.pos < self.bsize:
-            # read from the buffer
-            data = self.buff.read(len(b))
-        elif self.overflow:
-            # read from the original source
-            data = self.src.read(len(b))
-            if data is None:
-                # handle blocked read
-                return None
-        else:
-            # end of file
-            data = ''
-        self.pos += len(data)
-        b[0:len(data)] = data
-        return len(data)
-
-    def peek(self, nbytes):
-        """Read up to nbytes without advancing the position
-
-        If the stream is not seekable and we have read past the end of
-        the internal buffer then an empty string will be returned."""
-        if self.pos < self.bsize:
-            data = self.buff.read(nbytes)
-            # reset the position of the buffer
-            self.buff.seek(self.pos)
-            return data
-        else:
-            return ''
-
-
-class GzipEncoder(io.RawIOBase):
+class GzipEncoder(RawIOBase):
 
     """Wrapper to provide Gzip encoding of streams
 
@@ -205,7 +67,7 @@ class GzipEncoder(io.RawIOBase):
                 return 0
 
 
-class GzipDecoder(io.RawIOBase):
+class GzipDecoder(RawIOBase):
 
     """Wrapper to provide Gzip decoding of streams
 
@@ -278,7 +140,7 @@ class GzipDecoder(io.RawIOBase):
         return wbytes
 
 
-class ChunkedReader(io.RawIOBase):
+class ChunkedReader(RawIOBase):
 
     def __init__(self, src):
         self.src = src
@@ -320,6 +182,215 @@ class ChunkedReader(io.RawIOBase):
         b[:nbytes] = self.src.read(nbytes)
         self.chunk_left -= nbytes
         return nbytes
+
+
+class WSGIInputWrapper(io.RawIOBase):
+
+    """A class suitable for wrapping the WSGI input object.
+
+    environ
+        the WSGI environment dictionary
+
+    seek_size
+        the size of the seekable buffer, it defaults to
+        io.DEFAULT_BUFFER_SIZE
+
+    The purpose of the class is to behave in a more file like way, so
+    that applications can ignore the fact they are dealing with a wsgi
+    input stream.
+
+    The object will buffer the input stream and claim to be seekable for
+    the first *seek_size* bytes.  Once the stream has been advanced
+    beyond *seek_size* bytes the stream will raise IOError if seek is
+    called."""
+
+    def __init__(self, environ, seek_size=io.DEFAULT_BUFFER_SIZE):
+        super(WSGIInputWrapper, self).__init__()
+        self.input_stream = environ['wsgi.input']
+        if ('HTTP_TRANSFER_ENCODING' in environ and
+                environ['HTTP_TRANSFER_ENCODING'].lower() != 'identity'):
+            self.input_stream = ChunkedReader(self.input_stream)
+            # ignore the content length
+            self.inputLength = None
+        elif ("CONTENT_LENGTH" in environ and environ['CONTENT_LENGTH']):
+            self.inputLength = int(environ['CONTENT_LENGTH'])
+            if self.inputLength < seek_size:
+                # we can buffer the entire stream
+                seek_size = self.inputLength
+        else:
+            # read until EOF
+            self.inputLength = None
+        self.pos = 0
+        self.buffer = None
+        self.buffSize = 0
+        if seek_size > 0:
+            self.buffer = io.BytesIO()
+            # now fill the buffer
+            while self.buffSize < seek_size:
+                data = self.input_stream.read(seek_size - self.buffSize)
+                if len(data) == 0:
+                    # we ran out of data
+                    self.input_stream = None
+                    break
+                self.buffer.write(data)
+                self.buffSize = self.buffer.tell()
+            # now reset the buffer ready for reading
+            self.buffer.seek(0)
+
+    def read(self, n=-1):
+        """This is the heart of our wrapper.
+
+        We read bytes first from the buffer and, when exhausted, from
+        the input_stream itself."""
+        if self.closed:
+            raise IOError("WSGIInputWrapper was closed")
+        if n == -1:
+            return self.readall()
+        data = b''
+        if n and self.pos < self.buffSize:
+            data = self.buffer.read(n)
+            self.pos += len(data)
+            n = n - len(data)
+        if n and self.input_stream is not None:
+            if self.inputLength is not None and \
+                    self.pos + n > self.inputLength:
+                # application should not attempt to read past the
+                # CONTENT_LENGTH
+                n = self.inputLength - self.pos
+            idata = self.input_stream.read(n)
+            if len(idata) == 0:
+                self.input_stream = None
+            else:
+                self.pos += len(idata)
+                if data:
+                    data = data + idata
+                else:
+                    data = idata
+        return data
+
+    def seek(self, offset, whence=io.SEEK_SET):
+        if self.pos > self.buffSize:
+            raise IOError("WSGIInputWrapper seek buffer exceeded")
+        if whence == io.SEEK_SET:
+            new_pos = offset
+        elif whence == io.SEEK_CUR:
+            new_pos = self.pos + offset
+        elif whence == io.SEEK_END:
+            if self.inputLength is None:
+                raise IOError("WSGIInputWrapper can't seek from end of stream "
+                              "(CONTENT_LENGTH unknown)""")
+            new_pos = self.inputLength + offset
+        else:
+            raise IOError("Unknown seek mode (%i)" % whence)
+        if new_pos < 0:
+            raise IOError(
+                "WSGIInputWrapper: attempt to set the stream position "
+                "to a negative value")
+        if new_pos == self.pos:
+            return
+        if new_pos <= self.buffSize:
+            self.buffer.seek(new_pos)
+        else:
+            # we need to read and discard some bytes
+            while new_pos > self.pos:
+                n = new_pos - self.pos
+                if n > io.DEFAULT_BUFFER_SIZE:
+                    n = io.DEFAULT_BUFFER_SIZE
+                data = self.read(n)
+                if len(data) == 0:
+                    break
+                else:
+                    self.pos += len(data)
+        # new_pos may be beyond the end of the input stream, that's OK
+        self.pos = new_pos
+
+    def seekable(self):
+        """A bit cheeky here, we are initially seekable."""
+        if self.pos > self.buffSize:
+            return False
+        else:
+            return True
+
+    def fileno(self):
+        raise IOError("WSGIInputWrapper has no fileno")
+
+    def flush(self):
+        pass
+
+    def isatty(self):
+        return False
+
+    def readable(self):
+        return True
+
+    def readall(self):
+        result = []
+        while True:
+            data = self.read(io.DEFAULT_BUFFER_SIZE)
+            if data:
+                result.append(data)
+            else:
+                break
+        return b''.join(result)
+
+    def readinto(self, b):
+        n = len(b)
+        data = self.read(n)
+        i = 0
+        for d in data:
+            b[i] = ord(d)
+            i = i + 1
+        return len(data)
+
+    def readline(self, limit=-1):
+        """Read and return one line from the stream.
+
+        If limit is specified, at most limit bytes will be read.  The
+        line terminator is always b'\n' for binary files."""
+        line = []
+        while limit < 0 or len(line) < limit:
+            b = self.read(1)
+            if len(b) == 0:
+                break
+            line.append(b)
+            if b == b'\n':
+                break
+        return b''.join(line)
+
+    def readlines(self, hint=-1):
+        """Read and return a list of lines from the stream.
+
+        No more lines will be read if the total size (in
+        bytes/characters) of all lines so far exceeds hint."""
+        total = 0
+        lines = []
+        for line in self:
+            total = total + len(line)
+            lines.append(line)
+            if hint >= 0 and total > hint:
+                break
+        return lines
+
+    def tell(self):
+        return self.pos
+
+    def truncate(self, size=None):
+        raise IOError("WSGIInputWrapper cannot be truncated")
+
+    def writable(self):
+        return False
+
+    def write(self, b):
+        raise IOError("WSGIInputWrapper is not writable")
+
+    def writelines(self):
+        raise IOError("WSGIInputWrapper is not writable")
+
+    def __iter__(self):
+        while True:
+            line = self.readline()
+            if line:
+                yield line
 
 
 class Message(PEP8Compatibility, object):
@@ -374,15 +445,19 @@ class Message(PEP8Compatibility, object):
 
     def __init__(self, entity_body=None, protocol=params.HTTP_1p1,
                  send_stream=None, recv_stream=None):
-        #: the lock used to protect multi-threaded access
         PEP8Compatibility.__init__(self)
+        #: the lock used to protect multi-threaded access
         self.lock = threading.RLock()
         self.protocol = protocol
         self.headers = {}
-        if isinstance(entity_body, str):
-            self.entity_body = StringIO(entity_body)
+        #: boolean indicating that all headers have been received
+        self.got_headers = False
+        if isinstance(entity_body, bytes):
+            self.entity_body = io.BytesIO(entity_body)
             self.body_start = 0
             self.body_len = len(entity_body)
+        elif is_text(entity_body):
+            raise ValueError("HTTP Message entity_body must be binary data")
         elif entity_body is None:
             # no entity body
             self.entity_body = None
@@ -409,7 +484,7 @@ class Message(PEP8Compatibility, object):
             An :py:class:`params.HTTPVersion` instance or a string that
             can be parsed for one."""
         with self.lock:
-            if isinstance(version, types.StringTypes):
+            if is_string(version):
                 version = params.HTTPVersion.from_str(version)
             if not isinstance(version, params.HTTPVersion):
                 raise TypeError
@@ -447,6 +522,7 @@ class Message(PEP8Compatibility, object):
                     raise HTTPException("Can't resend "
                                         "non-seekable entity body")
             self.send_transferlength()
+            self.transferaborted = False
             self.transferPos = 0
             self.transferDone = False
             if self.transferchunked is False and self.transferlength is None:
@@ -469,9 +545,9 @@ class Message(PEP8Compatibility, object):
             h = self.headers[hKey]
             hname = h[0]
             for hvalue in h[1:]:
-                buffer.append("%s: %s\r\n" % (hname, hvalue))
-        buffer.append("\r\n")
-        return string.join(buffer, '')
+                buffer.append(b"%s: %s\r\n" % (hname, hvalue))
+        buffer.append(b"\r\n")
+        return b''.join(buffer)
 
     def send_transferlength(self):
         """Calculates the transfer length of the message
@@ -551,6 +627,47 @@ class Message(PEP8Compatibility, object):
             self.transferchunked = True
             self.transferlength = None
 
+    def abort_sending(self):
+        """Aborts sending the message body
+
+        Called after start_sending, this method attempts to abort the
+        sending the message body and returns the (approximate) number of
+        bytes that will be returned by future calls to send_body.
+        (Ignoring chunk boundaries.)
+
+        Messages that are already complete will return 0.
+
+        Messages that are using chunked transfer encoding can be aborted
+        and will return 0 indicating that the next chunk returned by
+        :meth:`send_body` will be the trailing chunk.
+
+        Messages that are not using chunked transfer encoding cannot be
+        aborted and will return the number of bytes remaining or -1 if
+        this cannot be determined (the latter case is only possible when
+        the message body will be terminated by a connection close and so
+        only applies to responses).
+
+        This method has a very special use case.  In cases where a
+        server rejects a request before reading the entire message body
+        the client may attempt to abort the sending of the body without
+        closing the connection.  The only way to do this is to truncate
+        a body being sent with chunked encoding.  You might wonder why a
+        client would go to such lengths to keep the connection open.
+        The answer is NTLM which authenticates a connection, so a large
+        POST that gets an early 401 response must be retried on the same
+        connection.  This can only be done if the message boundaries are
+        well defined.  There's a good discussion of the issue at
+        https://curl.haxx.se/mail/lib-2004-08/0002.html"""
+        if self.transferDone or self.transferbody is None:
+            return 0
+        if self.transferchunked:
+            self.transferaborted = True
+            return 0
+        elif self.transferlength is None:
+            return -1
+        else:
+            return self.transferlength - self.transferPos
+
     def send_body(self):
         """Returns (part of) the message body
 
@@ -558,30 +675,35 @@ class Message(PEP8Compatibility, object):
 
         Returns None if the message is read blocked."""
         if self.transferDone:
-            return ''
+            return b''
         if self.transferbody is None:
             self.transferDone = True
-            return ''
+            return b''
         else:
             # We're reading from a stream
             if self.transferchunked:
-                data = self.transferbody.read(io.DEFAULT_BUFFER_SIZE)
+                if self.transferaborted:
+                    # simulate end of the body
+                    data = b''
+                else:
+                    data = self.transferbody.read(io.DEFAULT_BUFFER_SIZE)
                 if data is None:
+                    # entity body source is blocked, None => call again
                     return None
                 self.transferPos += len(data)
                 buffer = []
                 if data:
                     self.body_started = True
-                    buffer.append(str(params.Chunk(len(data))))
+                    buffer.append(params.Chunk(len(data)).to_bytes())
                     buffer.append(grammar.CRLF)
                     buffer.append(data)
                     buffer.append(grammar.CRLF)
                 else:
-                    buffer.append(str(params.Chunk()))
+                    buffer.append(params.Chunk().to_bytes())
                     buffer.append(grammar.CRLF)
                     buffer.append(grammar.CRLF)
                     self.transferDone = True
-                data = string.join(buffer, '')
+                data = b''.join(buffer)
                 return data
             else:
                 if self.transferlength is None:
@@ -613,6 +735,7 @@ class Message(PEP8Compatibility, object):
     BLOCKED_MODE = 5
     CHUNK_END_MODE = 6
     CHUNK_TRAILER_MODE = 7
+    FLUSH_MODE = 8
 
     def start_receiving(self):
         """Starts receiving this message
@@ -623,17 +746,19 @@ class Message(PEP8Compatibility, object):
             self.transfermode = self.START_MODE
             self.protcolVersion = None
             self.headers = {}
+            self.got_headers = False
             self._curr_header = None
             if self.body_started:
                 if self.body_start is not None:
                     # we've been here before, truncate back
                     self.entity_body.truncate(self.body_start)
+                    self.entity_body.seek(self.body_start)
                 else:
                     raise HTTPException("Can't truncate "
                                         "non-seekable message body")
             elif self.entity_body is None:
                 # first time around promote None to a stream for reading
-                self.entity_body = StringIO()
+                self.entity_body = io.BytesIO()
                 self.body_start = 0
             # Transfer fields are set properly once we have the headers
             self.transferbody = self.entity_body
@@ -677,7 +802,7 @@ class Message(PEP8Compatibility, object):
             string of up to but not exceeding *integer* number of bytes
 
         0
-            we are currently write-blocked but still need more data, the
+            we are currently write-blocked but may need more data, the
             next call to recv must pass None to give the message time to
             write out existing buffered data.
 
@@ -696,7 +821,7 @@ class Message(PEP8Compatibility, object):
                     return self.transferlength - self.transferPos
                 else:
                     return self.RECV_ALL
-            elif self.transfermode == self.BLOCKED_MODE:
+            elif self.transfermode in (self.BLOCKED_MODE, self.FLUSH_MODE):
                 return 0
             elif self.transfermode in (self.HEADER_MODE,
                                        self.CHUNK_TRAILER_MODE):
@@ -781,10 +906,10 @@ class Message(PEP8Compatibility, object):
                     if self.transferlength:
                         extra = self.transferPos - self.transferlength
                         if extra > 0:
-                            logging.warn("%i bytes of spurious data in "
-                                         "http Message.recv in %s",
-                                         extra,
-                                         str(self.get_content_type()))
+                            logging.warning("%i bytes of spurious data in "
+                                            "http Message.recv in %s",
+                                            extra,
+                                            str(self.get_content_type()))
                             self.recv_buffer = data[:-extra]
                         else:
                             self.recv_buffer = data
@@ -793,9 +918,13 @@ class Message(PEP8Compatibility, object):
                         self.recv_buffer = data
                     self._recv_buffered()
                 else:
-                    self.transfer_mode = None
+                    # we only receive empty string when receive mode is
+                    # ALL (transferLength None) indicating EOF on source
+                    self._flush_buffered()
             elif self.transfermode == self.BLOCKED_MODE:
                 self._recv_buffered()
+            elif self.transfermode == self.FLUSH_MODE:
+                self._flush_buffered()
             elif self.transfermode == self.CHUNK_END_MODE:
                 # must be a naked CRLF
                 if data != grammar.CRLF:
@@ -804,21 +933,15 @@ class Message(PEP8Compatibility, object):
             elif self.transfermode == self.CHUNK_TRAILER_MODE:
                 for line in data:
                     self._recv_header(line)
-                try:
-                    self.transferbody.flush()
-                    self.transfermode = None
-                except IOError as e:
-                    if io_blocked(e):
-                        self.transfermode = self.BLOCKED_MODE
-                    else:
-                        raise
+                self._flush_buffered()
             else:
                 raise HTTPException(
                     "recv_line when in unknown mode: %i" % self.transfermode)
             if self.transfermode is None:
                 logging.debug("Message complete")
-                if self.transferbody:
-                    self.transferbody.flush()
+                # flushing now taken care of elsewhere
+                # if self.transferbody:
+                #    self.transferbody.flush()
                 self.handle_message()
 
     def recv_start(self, start_line):
@@ -845,7 +968,7 @@ class Message(PEP8Compatibility, object):
                 if self._curr_header:
                     self.set_header(
                         self._curr_header[0], self._curr_header[1][:-2], True)
-                ch = h.split(':', 1)
+                ch = h.split(b':', 1)
                 if len(ch) == 2:
                     self._curr_header = ch
                 else:
@@ -886,18 +1009,21 @@ class Message(PEP8Compatibility, object):
             self.transfermode = self.DATA_MODE
         elif self.transferPos >= self.transferlength:
             # not chunked, defined message body length
-            # we need a flushing mode here
-            try:
-                self.transferbody.flush()
-                self.transfermode = None
-            except IOError as e:
-                if io_blocked(e):
-                    self.transfermode = self.BLOCKED_MODE
-                else:
-                    raise
+            # we flush before saying we're done
+            self._flush_buffered()
         else:
             # not chunked, still reading
             self.transfermode = self.DATA_MODE
+
+    def _flush_buffered(self):
+        try:
+            self.transferbody.flush()
+            self.transfermode = None
+        except IOError as e:
+            if io_blocked(e):
+                self.transfermode = self.FLUSH_MODE
+            else:
+                raise
 
     def handle_headers(self):
         """Hook for processing the message headers
@@ -906,7 +1032,10 @@ class Message(PEP8Compatibility, object):
         before the message body (if any) is received.  Derived classes
         should always call this implementation first (using super) to
         ensure basic validation is performed on the message before the
-        body is received."""
+        body is received.
+
+        The default implementation sets :attr:`got_headers` to True."""
+        self.got_headers = True
         content_type = self.get_content_type()
         if content_type is not None and content_type.type == "multipart":
             # there must be boundary parameter
@@ -986,13 +1115,13 @@ class Message(PEP8Compatibility, object):
             # length in practice so we should normally be OK.
             ctokens = self.get_connection()
             if "close" not in ctokens:
-                logging.warn("multipart/byteranges message with implicit "
-                             "content-length will terminate connection")
+                logging.warning("multipart/byteranges message with implicit "
+                                "content-length will terminate connection")
             self.clear_keep_alive()
             # but to make sure we don't massively over-read we do track
             # the boundary
             try:
-                self.tboundary = "\r\n--%s--" % content_type[
+                self.tboundary = b"\r\n--%s--" % content_type[
                     'boundary'].strip()
                 self.tboundary_match = []
             except KeyError:
@@ -1015,12 +1144,12 @@ class Message(PEP8Compatibility, object):
 
         The list is alphabetically sorted and lower-cased."""
         with self.lock:
-            hlist = self.headers.keys()
-            hlist.sort()
+            hlist = sorted(dict_keys(self.headers))
             return hlist
 
     def has_header(self, field_name):
         """True if this message has a header with field_name"""
+        field_name = force_bytes(field_name)
         with self.lock:
             return field_name.lower() in self.headers
 
@@ -1028,24 +1157,26 @@ class Message(PEP8Compatibility, object):
         """Returns the header with *field_name* as a string.
 
         list_mode=False
-            In this mode, get_header always returns a single string,
-            this isn't always what you want as it automatically 'folds'
-            multiple headers with the same name into a string using ", "
-            as a separator.
+            In this mode, get_header always returns a single binary
+            string, this isn't always what you want as it automatically
+            'folds' multiple headers with the same name into a string
+            using ", " as a separator.
 
         list_mode=True
-            In this mode, get_header always returns a list of strings.
+            In this mode, get_header always returns a list of binary
+            strings.
 
         If there is no header with *field_name* then None is returned
         in both modes."""
         with self.lock:
-            h = self.headers.get(field_name.lower(), [None, None])
+            h = self.headers.get(force_bytes(field_name).lower(),
+                                 [None, None])
             if h[1] is None:
                 return None
             if list_mode:
                 return h[1:]
             else:
-                return string.join(h[1:], ", ")
+                return b", ".join(h[1:])
 
     def set_header(self, field_name, field_value, append_mode=False):
         """Sets the header with *field_name* to the string *field_value*.
@@ -1097,7 +1228,7 @@ class Message(PEP8Compatibility, object):
         if allowed is None:
             self.set_header("Allow", None)
         else:
-            if type(allowed) in types.StringTypes:
+            if is_string(allowed):
                 allowed = Allow.from_str(allowed)
             if not isinstance(allowed, Allow):
                 raise TypeError
@@ -1141,7 +1272,7 @@ class Message(PEP8Compatibility, object):
         if cc is None:
             self.set_header("Cache-Control", None)
         else:
-            if type(cc) in types.StringTypes:
+            if is_string(cc):
                 cc = CacheControl.from_str(cc)
             if not isinstance(cc, CacheControl):
                 raise TypeError
@@ -1155,7 +1286,7 @@ class Message(PEP8Compatibility, object):
         field_value = self.get_header("Connection")
         if field_value:
             hp = HeaderParser(field_value)
-            return set(map(lambda x: x.lower(), hp.parse_tokenlist()))
+            return set(t.lower() for t in hp.parse_tokenlist())
         else:
             return set()
 
@@ -1166,7 +1297,7 @@ class Message(PEP8Compatibility, object):
         If the list is empty any existing header is removed."""
         if connection_tokens:
             self.set_header(
-                "Connection", string.join(list(connection_tokens), ", "))
+                "Connection", ", ".join(list(connection_tokens)))
         else:
             self.set_header("Connection", None)
 
@@ -1182,7 +1313,7 @@ class Message(PEP8Compatibility, object):
         field_value = self.get_header("Content-Encoding")
         if field_value:
             hp = HeaderParser(field_value)
-            return map(lambda x: x.lower(), hp.parse_tokenlist())
+            return list(t.lower() for t in hp.parse_tokenlist())
         else:
             return []
 
@@ -1192,7 +1323,7 @@ class Message(PEP8Compatibility, object):
         header is removed."""
         if content_codings:
             self.set_header(
-                "Content-Encoding", string.join(list(content_codings), ", "))
+                "Content-Encoding", ", ".join(list(content_codings)))
         else:
             self.set_header("Content-Encoding", None)
 
@@ -1213,7 +1344,7 @@ class Message(PEP8Compatibility, object):
         :py:class:`LanguageTag` instances."""
         if lang_list:
             self.set_header(
-                "Content-Language", string.join(map(str, lang_list), ", "))
+                "Content-Language", ", ".join(str(l) for l in lang_list))
         else:
             self.set_header("Content-Language", None)
 
@@ -1347,7 +1478,7 @@ class Message(PEP8Compatibility, object):
     def get_expect_continue(self):
         field_value = self.get_header("Expect")
         if field_value is not None:
-            return field_value.strip().lower() == "100-continue"
+            return field_value.strip().lower() == b"100-continue"
         else:
             return False
 
@@ -1416,12 +1547,12 @@ class Message(PEP8Compatibility, object):
             A list of :py:class:`params.TransferEncoding` instances or a
             string from which one can be parsed.  If None then the
             header is removed."""
-        if isinstance(field_value, types.StringTypes):
+        if is_string(field_value):
             field_value = params.TransferEncoding.list_from_str(field_value)
         if field_value is not None:
             self._check_transfer_encoding(field_value)
             self.set_header("Transfer-Encoding",
-                            string.join(map(str, field_value), ", "))
+                            ", ".join(str(v) for v in field_value))
         else:
             self.set_header("Transfer-Encoding", None)
 
@@ -1443,7 +1574,7 @@ class Message(PEP8Compatibility, object):
         that "upgrade" is present in the Connection header."""
         if protocols:
             self.set_header(
-                "Upgrade", string.join(map(str, protocols), ", "))
+                "Upgrade", ", ".join(str(p) for p in protocols))
             connection = self.get_connection()
             if "upgrade" not in connection:
                 connection.add("upgrade")
@@ -1456,6 +1587,262 @@ class Message(PEP8Compatibility, object):
 
     def set_host(self, server):
         self.set_header("Host", server)
+
+
+class RecvWrapperBase(RawIOBase):
+
+    def __init__(self, src):
+        io.RawIOBase.__init__(self)
+        self.src = src
+        self.buffer = bytearray()
+
+    def readable(self):
+        return True
+
+    def writable(self):
+        return False
+
+    def write(self, b):
+        raise IOError(errno.EPERM, os.strerror(errno.EPERM),
+                      "stream not writable")
+
+    def fill_buffer(self, nbytes=io.DEFAULT_BUFFER_SIZE):
+        """Fills the buffer with bytes from the source
+
+        nbytes
+            The number of bytes to read.  The method won't necessarily
+            read nbytes of data but it won't read more than nbytes.
+
+        Returns False if we're blocked on read, True if we successfully
+        read at least *some* bytes.  The bytes read are added to the
+        existing :attr:`buffer`.
+
+        If we encounter an EOF condition on the input stream then we
+        raise an exception."""
+        data = self.src.read(nbytes)
+        if data is None:
+            return False
+        elif data:
+            self.buffer.extend(data)
+            return True
+        else:
+            # EOF condition
+            raise ProtocolError("unexpected end of message")
+
+
+class RecvWrapper(RecvWrapperBase):
+
+    """A stream wrapper for reading HTTP Messages
+
+    src
+        The source stream from which the HTTP message will be read, must
+        be an object supporting the RawIOBase interface.
+
+    message_class
+        A subclass of :class:`Message` that will be read from the source
+        stream.  An instance is created on construction and used to set
+        :attr:`message`.
+
+    The RecvWrapper instance itself behaves like a stream allowing you
+    to read the body of the message.  The headers are automatically read
+    into the :attr:`message` object.
+
+    An internal buffer is maintained which may cause the source stream
+    to be read past the end of the actual message.  Although HTTP
+    messages may be self-delimitting the cost of reading a byte at a
+    time is too high to be practicable."""
+
+    def __init__(self, src, message_class):
+        RecvWrapperBase.__init__(self, src)
+        self.p = Pipe(rblocking=False, wblocking=False)
+        self.message = message_class(entity_body=self.p)
+        self._got_headers = False
+        self.message.start_receiving()
+        self.buffer = bytearray()
+
+    def close(self):
+        super(RecvWrapper, self).close()
+        self.p.close()
+
+    def _read_task_done(self):
+        # True if there is nothing more to do reading this message
+        # False if we should be called again
+        # None if we are blocked on reading from source
+        mode = self.message.recv_mode()
+        if mode is None:
+            # we're done, pipe empty and message complete
+            return True
+        elif mode == Message.RECV_HEADERS:
+            pos = self.buffer.find(b"\r\n\r\n")
+            if pos < 0:
+                if self.buffer.startswith(b"\r\n"):
+                    # catch a degenerate case, no headers
+                    pos = 0
+            if pos < 0:
+                # fill the buffer and loop
+                if not self.fill_buffer():
+                    # blocked on our read
+                    return None
+            else:
+                headers = []
+                base = 0
+                while base <= pos:
+                    i = self.buffer.find(b"\r\n", base)
+                    headers.append(bytes(self.buffer[base:i + 2]))
+                    base = i + 2
+                headers.append(b"\r\n")
+                self.message.recv(headers)
+                self.buffer = self.buffer[pos + 4:]
+        elif mode == Message.RECV_LINE:
+            pos = self.buffer.find(b"\r\n")
+            if pos < 0:
+                # fill the buffer and loop
+                if not self.fill_buffer():
+                    return None
+            else:
+                self.message.recv(bytes(self.buffer[:pos + 2]))
+                del self.buffer[:pos + 2]
+        elif mode == Message.RECV_ALL:
+            if self.buffer:
+                self.message.recv(bytes(self.buffer))
+                self.buffer = bytearray()
+            else:
+                try:
+                    if not self.fill_buffer():
+                        return None
+                except ProtocolError:
+                    # end of message is just that
+                    return True
+        elif mode == 0:
+            # just yield time, the Pipe is full and blocking
+            self.message.recv(None)
+        elif mode > 0:
+            if len(self.buffer) >= mode:
+                # send the requested bytes
+                self.message.recv(bytes(self.buffer[:mode]))
+                del self.buffer[:mode]
+            elif self.buffer:
+                # send the buffer
+                self.message.recv(bytes(self.buffer))
+                del self.buffer[:]
+            else:
+                # fill the buffer with mode bytes
+                if not self.fill_buffer(mode):
+                    return None
+        else:
+            raise RuntimeError("Unexpected message mode")
+        return False
+
+    def read_message_header(self):
+        """Read the message headers
+
+        Returns the :class:`~pyslet.http.Message` object after all the
+        headers have been set from the source stream.  If the source
+        stream is blocked on reading and is in non-blocking mode then
+        None may be returned.
+
+        Subsequent calls just return the previously parsed message
+        object which is also available in the :attr:`message`
+        attribute."""
+        while not self._got_headers:
+            if self.p.canread():
+                break
+            done = self._read_task_done()
+            if done is True:
+                # empty body, message complete
+                break
+            elif done is None:
+                return None
+        self._got_headers = True
+        return self.message
+
+    def readinto(self, b):
+        if self.closed:
+            raise IOError(errno.EBADF, os.strerror(errno.EBADF),
+                          "stream is closed")
+        while True:
+            if self.p.canread():
+                return self.p.readinto(b)
+            done = self._read_task_done()
+            if done is True:
+                # message complete
+                return 0
+            elif done is None:
+                return None
+
+
+class SendWrapper(RawIOBase):
+
+    """A stream wrapper for sending HTTP Messages
+
+    message
+        An instance of :class:`Message` that will be serialised.
+        The sending process starts immediately with a call to
+        the message's :meth:`Message.start_sending` method.
+
+    protocol
+        An optional argument used to determine the protocol used in
+        start_sending, defaults to HTTP/1.1.
+
+    The SendWrapper instance itself behaves like a stream allowing you
+    to read the serialised version of the message including the headers
+    and any applicable start line (e.g., the status line in an HTTP
+    response).
+
+    If the message has a body that is itself read from a stream then
+    that stream will be read as needed with limited buffering."""
+
+    def __init__(self, message, protocol=params.HTTP_1p1):
+        io.RawIOBase.__init__(self)
+        self.message = message
+        self.message.start_sending(protocol)
+        self.buffer = self.message.send_start() + self.message.send_header()
+        self.bpos = 0
+
+    def readable(self):
+        return True
+
+    def writable(self):
+        return False
+
+    def write(self, b):
+        raise IOError(errno.EPERM, os.strerror(errno.EPERM),
+                      "stream not writable")
+
+    def readinto(self, b):
+        if self.closed:
+            raise IOError(errno.EBADF, os.strerror(errno.EBADF),
+                          "stream is closed")
+        while True:
+            if self.buffer is None:
+                # end of file condition
+                return 0
+            nbytes = len(b)
+            bbytes = len(self.buffer) - self.bpos
+            if bbytes <= 0:
+                # attempt to refill the buffer
+                new_buffer = self.message.send_body()
+                if new_buffer is None:
+                    # read blocked
+                    return None
+                elif not new_buffer:
+                    # EOF
+                    self.buffer = None
+                    return 0
+                else:
+                    bbytes = len(new_buffer)
+                    self.buffer = new_buffer
+                    self.bpos = 0
+            if bbytes > 0:
+                # return the remains of the buffer
+                if nbytes > bbytes:
+                    nbytes = bbytes
+                b[:nbytes] = self.buffer[self.bpos:self.bpos + nbytes]
+                self.bpos += nbytes
+                return nbytes
+            else:
+                # buffer was not refilled but not EOF
+                return None
 
 
 class Request(Message):
@@ -1480,7 +1867,7 @@ class Request(Message):
         logging.info("Sending request to %s", self.get_host())
         start = self.get_start()
         logging.info(start)
-        return (start + "\r\n")
+        return (start + b"\r\n")
 
     def send_transferlength(self):
         """Adds request-specific processing for transfer-length
@@ -1507,11 +1894,12 @@ class Request(Message):
                 # a request cannot be sent forever so this message is
                 # unsendable (presumably because we're targetting a
                 # server that is not known to speak HTTP/1.1
-                self.entity_body = BufferedEntityWrapper(
+                self.entity_body = BufferedStreamWrapper(
                     self.entity_body, self.MAX_READAHEAD)
                 if self.entity_body.length is not None:
                     # small enough to be buffered, try again
-                    logging.warn("Request buffered to send to HTTP/1.0 server")
+                    logging.warning(
+                        "Request buffered to send to HTTP/1.0 server")
                     self.body_len = self.entity_body.length
                     super(Request, self).send_transferlength()
                 else:
@@ -1525,9 +1913,10 @@ class Request(Message):
         try:
             if len(start_items) != 3:
                 raise ValueError
-            self.method = start_items[0].upper()
-            grammar.check_token(self.method)
-            self.request_uri = start_items[1]
+            method = start_items[0].upper()
+            grammar.check_token(method)
+            self.method = method.decode('iso-8859-1')
+            self.request_uri = start_items[1].decode('iso-8859-1')
             self.protocol = params.HTTPVersion.from_str(start_items[2])
         except ValueError:
             raise ProtocolError("Badly formed Request-line: %s" % line)
@@ -1545,7 +1934,7 @@ class Request(Message):
         with self.lock:
             return b"%s %s %s" % (force_bytes(self.method),
                                   force_bytes(self.request_uri),
-                                  force_bytes(str(self.protocol)))
+                                  self.protocol.to_bytes())
 
     def is_idempotent(self):
         """Returns True if this is an idempotent request"""
@@ -1617,7 +2006,7 @@ class Request(Message):
         *accept_value*
                 A :py:class:`AcceptList` instance or a string that one can
                 be parsed from."""
-        if type(accept_value) in types.StringTypes:
+        if is_string(accept_value):
             accept_value = AcceptList.from_str(accept_value)
         if not isinstance(accept_value, AcceptList):
             raise TypeError
@@ -1638,7 +2027,7 @@ class Request(Message):
         *accept_value*
                 A :py:class:`AcceptCharsetList` instance or a string that
                 one can be parsed from."""
-        if type(accept_value) in types.StringTypes:
+        if is_string(accept_value):
             accept_value = AcceptCharsetList.from_str(accept_value)
         if not isinstance(accept_value, AcceptCharsetList):
             raise TypeError
@@ -1659,7 +2048,7 @@ class Request(Message):
         *accept_value*
                 A :py:class:`AcceptEncodingList` instance or a string that
                 one can be parsed from."""
-        if type(accept_value) in types.StringTypes:
+        if is_string(accept_value):
             accept_value = AcceptEncodingList.from_str(accept_value)
         if not isinstance(accept_value, AcceptEncodingList):
             raise TypeError
@@ -1692,8 +2081,7 @@ class Request(Message):
         else:
             self.set_header(
                 'Cookie',
-                string.join(map(lambda x: "%s=%s" % (x.name, x.value),
-                                cookie_list), "; "))
+                b"; ".join(b"%s=%s" % (c.name, c.value) for c in cookie_list))
 
 
 class Response(Message):
@@ -1743,10 +2131,13 @@ class Response(Message):
         505: "HTTP Version not supported"
     }
 
-    def __init__(self, request, **kwargs):
+    def __init__(self, request=None, **kwargs):
         super(Response, self).__init__(**kwargs)
-        self.request = request
-        request.response = self
+        if request is None:
+            self.request = Request()
+        else:
+            self.request = request
+        self.request.response = self
         self.status = None
         self.reason = None
 
@@ -1774,8 +2165,9 @@ class Response(Message):
         logging.info(
             "Sending response: %s %s %s",
             str(self.protocol), str(self.status), self.reason)
-        return ("%s %s %s\r\n" %
-                (str(self.protocol), str(self.status), self.reason))
+        return (b"%s %s %s\r\n" %
+                (self.protocol.to_bytes(), b'%i' % self.status,
+                 self.reason.encode('iso-8859-1')))
 
     def send_transferlength(self):
         if (self.status // 100 == 1 or self.status == 204 or
@@ -1824,14 +2216,14 @@ class Response(Message):
     def recv_start(self, line):
         # Read the status line
         pstatus = params.ParameterParser(line[:-2], ignore_sp=False)
-        self.protocol = pstatus.parse_http_version()
+        self.protocol = pstatus.parse_production(pstatus.require_http_version)
         pstatus.parse_sp()
         if pstatus.is_integer():
             self.status = pstatus.parse_integer()
         else:
             self.status = 0
         pstatus.parse_sp()
-        self.reason = pstatus.parse_remainder()
+        self.reason = pstatus.parse_remainder().decode('iso-8859-1')
 
     def recv_transferlength(self):
         self.transferchunked = False
@@ -1860,7 +2252,7 @@ class Response(Message):
         *accept_value*
                 A :py:class:`AcceptRanges` instance or a string that
                 one can be parsed from."""
-        if type(accept_value) in types.StringTypes:
+        if is_string(accept_value):
             accept_value = AcceptRanges.from_str(accept_value)
         if not isinstance(accept_value, AcceptRanges):
             raise TypeError
@@ -1943,7 +2335,7 @@ class Response(Message):
         if field_value is not None:
             return auth.Challenge.list_from_str(field_value)
         else:
-            return None
+            return []
 
     def set_www_authenticate(self, challenges):
         """Sets the "WWW-Authenticate" header, replacing any exsiting
@@ -1954,8 +2346,8 @@ class Response(Message):
         if challenges is None:
             self.set_header("WWW-Authenticate", None)
         else:
-            self.set_header(
-                "WWW-Authenticate", string.join(map(str, challenges), ", "))
+            self.set_header("WWW-Authenticate",
+                            b", ".join(c.to_bytes() for c in challenges))
 
     def get_set_cookie(self):
         """Reads all 'Set-Cookie' headers
@@ -1964,7 +2356,7 @@ class Response(Message):
         """
         field_value = self.get_header('Set-Cookie', list_mode=True)
         if field_value is not None:
-            return map(cookie.Cookie.from_str, field_value)
+            return list(cookie.Cookie.from_str(v) for v in field_value)
         else:
             return None
 
@@ -1999,19 +2391,15 @@ class MediaRange(params.MediaType):
 
     """Represents an HTTP media-range.
 
-    The built-in str function can be used to format instances according
-    to the grammar defined in the specification.
-
-    Instances are immutable, they define comparison methods and a hash
-    implementation to allow them to be used as keys in dictionaries.
     Quoting from the specification:
 
         "Media ranges can be overridden by more specific media ranges or
         specific media types. If more than one media range applies to a
         given type, the most specific reference has precedence."
 
-    In other words, the following media ranges would be sorted in the
-    order shown:
+    We override the base class ordering so that MediaRange instances
+    sort according to these rules.  The following media ranges would be
+    sorted in the order shown:
 
     1.  image/png
     2.  image/\*
@@ -2038,34 +2426,15 @@ class MediaRange(params.MediaType):
         return mr
 
     def __repr__(self):
-        return ("MediaType(%s,%s,%s)" % (repr(self.type),
-                                         repr(self.subtype),
-                                         repr(self.parameters)))
+        return ("MediaType(%s, %s, %s)" % (repr(self.type),
+                                           repr(self.subtype),
+                                           repr(self.parameters)))
 
-    def __cmp__(self, other):
-        result = self._cmp_types(self.type, other.type)
-        if result:
-            return result
-        result = self._cmp_types(self.subtype, other.subtype)
-        if result:
-            return result
-        # more parameters means higher precedence
-        result = -cmp(len(self.parameters), len(other.parameters))
-        if result:
-            return result
-        return cmp(self.parameters, other.parameters)
-
-    def _cmp_types(self, atype, btype):
-        if atype == '*':
-            if btype == '*':
-                return 0
-            else:
-                return 1
-        else:
-            if btype == '*':
-                return -1
-            else:
-                return cmp(atype.lower(), btype.lower())
+    def sortkey(self):
+        t = '~' if self.type == '*' else self.type
+        st = '~' if self.subtype == '*' else self.subtype
+        # parameters sort before no parameters
+        return (t, st, -len(self._hp), self._hp)
 
     def match_media_type(self, mtype):
         """Tests whether a media-type matches this range.
@@ -2114,16 +2483,9 @@ class MediaRange(params.MediaType):
 MULTIPART_BYTERANGES_RANGE = MediaRange("multipart", "byteranges")
 
 
-class AcceptItem(MediaRange):
+class AcceptItem(params.SortableParameter):
 
     """Represents a single item in an Accept header
-
-    The built-in str function can be used to format instances according
-    to the grammar defined in the specification.
-
-    Instances are immutable, they define comparison
-    methods and a hash implementation to allow them to be used as keys
-    in dictionaries.
 
     Accept items are sorted by their media ranges.  Equal media ranges
     sort by *descending* qvalue, for example:
@@ -2135,8 +2497,8 @@ class AcceptItem(MediaRange):
     def __init__(self, range=MediaRange(), qvalue=1.0, extensions={}):
         #: the :py:class:`MediaRange` instance that is acceptable
         self.range = range
-        self.q = qvalue         #: the q-value (defaults to 1.0)
-        self.params = extensions  # : any accept-extension parameters
+        self.q = qvalue             #: the q-value (defaults to 1.0)
+        self.params = extensions    # : any accept-extension parameters
 
     @classmethod
     def from_str(cls, source):
@@ -2148,31 +2510,18 @@ class AcceptItem(MediaRange):
         p.require_end("Accept header item")
         return ai
 
-    def __str__(self):
-        result = [str(self.range)]
+    def to_bytes(self):
+        result = [self.range.to_bytes()]
         if self.params or self.q != 1.0:
-            qstr = "%.3f" % self.q
-            qstr = qstr.rstrip('0')
-            qstr = qstr.rstrip('.')
-            result.append("; q=%s" % qstr)
+            qstr = b"%.3f" % self.q
+            qstr = qstr.rstrip(b'0')
+            qstr = qstr.rstrip(b'.')
+            result.append(b"; q=%s" % qstr)
             result.append(grammar.format_parameters(self.params))
-        return string.join(result, '')
+        return b''.join(result)
 
-    def __cmp__(self, other):
-        if type(other) in types.StringTypes:
-            other = AcceptItem.from_str(other)
-        elif not isinstance(other, AcceptItem):
-            raise TypeError
-        result = cmp(self.range, other.range)
-        if result == 0:
-            if self.q > other.q:
-                return -1
-            elif self.q < other.q:
-                return 1
-        return result
-
-    def __hash__(self):
-        return hash(self.range, self.q)
+    def sortkey(self):
+        return (self.range, -self.q)
 
 
 class AcceptList(object):
@@ -2224,7 +2573,7 @@ class AcceptList(object):
         return al
 
     def __str__(self):
-        return string.join(map(str, self._items), ', ')
+        return ', '.join(str(i) for i in self._items)
 
     def __len__(self):
         return len(self._items)
@@ -2236,16 +2585,9 @@ class AcceptList(object):
         return self._items.__iter__()
 
 
-class AcceptToken(object):
+class AcceptToken(params.SortableParameter):
 
     """Represents a single item in a token-based Accept-* header
-
-    The built-in str function can be used to format instances according
-    to the grammar defined in the specification.
-
-    Instances are immutable, they define comparison
-    methods and a hash implementation to allow them to be used as keys
-    in dictionaries.
 
     AcceptToken items are sorted by their token, with wild cards sorting
     behind specified tokens.  Equal values sort by *descending* qvalue,
@@ -2269,46 +2611,26 @@ class AcceptToken(object):
         p.require_end("Accept token")
         return at
 
-    def __str__(self):
+    def to_bytes(self):
         result = [self.token]
         if self.q != 1.0:
             qstr = "%.3f" % self.q
             qstr = qstr.rstrip('0')
             qstr = qstr.rstrip('.')
             result.append(";q=%s" % qstr)
-        return string.join(result, '')
+        return ''.join(result).encode('ascii')
 
-    def __cmp__(self, other):
-        if type(other) in types.StringTypes:
-            other = AcceptToken.from_str(other)
-        elif not isinstance(other, AcceptToken):
-            raise TypeError
+    def sortkey(self):
         if self.token == "*":
-            if other.token == "*":
-                result = 0
-            else:
-                return 1
-        elif other.token == "*":
-            return -1
+            token = "~"
         else:
-            result = cmp(self._token, other._token)
-        if result == 0:
-            if self.q > other.q:
-                return -1
-            elif self.q < other.q:
-                return 1
-        return result
-
-    def __hash__(self):
-        return hash(self._token, self.q)
+            token = self.token
+        return (token, -self.q)
 
 
-class AcceptTokenList(object):
+class AcceptTokenList(params.Parameter):
 
     """Represents the value of a token-based Accept-* header
-
-    The built-in str function can be used to format instances according
-    to the grammar defined in the specification.
 
     Instances are immutable, they are constructed from one or more
     :py:class:`AcceptToken` instances.  There are no comparison methods.
@@ -2356,8 +2678,8 @@ class AcceptTokenList(object):
         p.require_end("Accept header")
         return al
 
-    def __str__(self):
-        return string.join(map(str, self._items), ', ')
+    def to_bytes(self):
+        return b', '.join(str(i) for i in self._items)
 
     def __len__(self):
         return len(self._items)
@@ -2452,17 +2774,10 @@ class AcceptLanguageItem(AcceptToken):
         else:
             self._range = tuple(self._token.split("-"))
 
-    def __cmp__(self, other):
-        if type(other) in types.StringTypes:
-            other = AcceptLanguageItem.from_str(other)
-        elif not isinstance(other, AcceptLanguageItem):
-            raise TypeError
-        # sort first by length, longest first to catch most specific match
-        result = cmp(len(other._range), len(self._range))
-        if result == 0:
-            # and then secondary sort on alphabetical
-            result = cmp(self._range, other._range)
-        return result
+    def sortkey(self):
+        # sort first by length, longest first to catch most specific
+        # match and then secondary sort on alphabetical
+        return (-len(self._range), self._range)
 
 
 class AcceptLanguageList(AcceptTokenList):
@@ -2477,8 +2792,8 @@ class AcceptLanguageList(AcceptTokenList):
 
     def select_token(self, token_list):
         """Remapped to :py:meth:`select_language`"""
-        return str(self.select_language(map(params.LanguageTag.from_str,
-                                            token_list)))
+        return str(self.select_language(
+                   list(params.LanguageTag.from_str(t) for t in token_list)))
 
     def select_language(self, lang_list):
         bestmatch = None
@@ -2494,24 +2809,21 @@ class AcceptLanguageList(AcceptTokenList):
         return bestmatch
 
 
-class AcceptRanges(object):
+class AcceptRanges(params.SortableParameter):
 
     """Represents the value of an Accept-Ranges response header.
 
-    The built-in str function can be used to format instances according
-    to the grammar defined in the specification.
-
-    Instances are immutable, they are constructed from
-    a list of string arguments.  If the argument list is empty then a
-    value of "none" is assumed.
+    Instances are immutable, they are constructed from a list of string
+    arguments.  If the argument list is empty then a value of "none" is
+    assumed.
 
     Instances behave like read-only lists implementing len, indexing and
     iteration in the usual way.  Comparison methods are provided."""
 
     def __init__(self, *args):
-        self._ranges = args
-        self._sorted = map(lambda x: x.lower(), list(args))
-        if "none" in self._sorted:
+        self._ranges = [self.bstr(a) for a in args]
+        self._sorted = list(a.lower() for a in self._ranges)
+        if b"none" in self._sorted:
             if len(self._sorted) == 1:
                 self._ranges = ()
                 self._sorted = []
@@ -2530,11 +2842,11 @@ class AcceptRanges(object):
         p.require_end("Accept-Ranges header")
         return AcceptRanges(*ar)
 
-    def __str__(self):
+    def to_bytes(self):
         if self._ranges:
-            return string.join(map(str, self._ranges), ', ')
+            return b', '.join(r for r in self._ranges)
         else:
-            return "none"
+            return b"none"
 
     def __len__(self):
         return len(self._ranges)
@@ -2545,20 +2857,13 @@ class AcceptRanges(object):
     def __iter__(self):
         return self._ranges.__iter__()
 
-    def __cmp__(self, other):
-        if type(other) in types.StringTypes:
-            other = AcceptRanges.from_str(other)
-        if not isinstance(other, AcceptRanges):
-            raise TypeError
-        return cmp(self._sorted, other._sorted)
+    def sortkey(self):
+        return self._sorted
 
 
-class Allow(object):
+class Allow(params.SortableParameter):
 
     """Represents the value of an Allow entity header.
-
-    The built-in str function can be used to format instances according
-    to the grammar defined in the specification.
 
     Instances are immutable, they are constructed from
     a list of string arguments which may be empty.
@@ -2567,9 +2872,8 @@ class Allow(object):
     iteration in the usual way.  Comparison methods are provided."""
 
     def __init__(self, *args):
-        self._methods = map(lambda x: x.upper(), args)
-        self._sorted = list(self._methods)
-        self._sorted.sort()
+        self._methods = list(self.bstr(a).upper() for a in args)
+        self._sorted = sorted(self._methods)
 
     @classmethod
     def from_str(cls, source):
@@ -2581,10 +2885,10 @@ class Allow(object):
 
     def is_allowed(self, method):
         """Tests if *method* is allowed by this value."""
-        return method.upper() in self._sorted
+        return self.bstr(method).upper() in self._sorted
 
-    def __str__(self):
-        return string.join(self._methods, ', ')
+    def to_bytes(self):
+        return b', '.join(self._methods)
 
     def __len__(self):
         return len(self._methods)
@@ -2595,20 +2899,13 @@ class Allow(object):
     def __iter__(self):
         return self._methods.__iter__()
 
-    def __cmp__(self, other):
-        if type(other) in types.StringTypes:
-            other = Allow.from_str(other)
-        if not isinstance(other, Allow):
-            raise TypeError
-        return cmp(self._sorted, other._sorted)
+    def sortkey(self):
+        return self._sorted
 
 
-class CacheControl(object):
+class CacheControl(params.Parameter):
 
     """Represents the value of a Cache-Control general header.
-
-    The built-in str function can be used to format instances according
-    to the grammar defined in the specification.
 
     Instances are immutable, they are constructed from a list of
     arguments which must not be empty.  Arguments are treated as follows:
@@ -2641,7 +2938,7 @@ class CacheControl(object):
                 d, v = a
             else:
                 d, v = a, None
-            d = d.lower()
+            d = self.bstr(d).lower()
             self._directives.append(d)
             self._values[d] = v
 
@@ -2653,28 +2950,31 @@ class CacheControl(object):
         p.require_end("Cache-Control header")
         return cc
 
-    def __str__(self):
+    def to_bytes(self):
         result = []
         for d in self._directives:
             v = self._values[d]
             if v is None:
                 result.append(d)
             elif isinstance(v, tuple):
-                result.append(
-                    "%s=%s" %
-                    (d, grammar.quote_string(string.join(map(str, v), ", "))))
+                result.append(b"%s=%s" % (
+                              d, grammar.quote_string(
+                                  b", ".join(str(s).encode('ascii')
+                                             for s in v))))
             else:
-                result.append(
-                    "%s=%s" % (d, grammar.quote_string(str(v), force=False)))
-        return string.join(result, ", ")
+                result.append(b"%s=%s" % (
+                              d, grammar.quote_string(
+                                  str(v).encode('ascii'), force=False)))
+        return b", ".join(result)
 
     def __len__(self):
         return len(self._directives)
 
     def __getitem__(self, index):
-        if type(index) in types.StringTypes:
+        if is_string(index):
             # look up by key
-            return self._values[index.lower()]
+            index = self.bstr(index).lower()
+            return self._values[index]
         else:
             d = self._directives[index]
             v = self._values[d]
@@ -2692,7 +2992,7 @@ class CacheControl(object):
                 yield (d, v)
 
     def __contains__(self, key):
-        return key.lower() in self._values
+        return self.bstr(key).lower() in self._values
 
 
 class ContentRange(object):
@@ -2749,7 +3049,7 @@ class ContentRange(object):
             result.append("*")
         else:
             result.append(str(self.total_len))
-        return string.join(result, '')
+        return ''.join(result)
 
     def __len__(self):
         if self.first_byte is not None:
@@ -2772,7 +3072,10 @@ class ContentRange(object):
 
 class HeaderParser(params.ParameterParser):
 
-    """A special parser for parsing HTTP headers from TEXT"""
+    """A special parser for parsing HTTP headers from TEXT
+
+    In keeping with RFC2616 all parsing is done on binary strings.  See
+    base class for more information."""
 
     def parse_media_range(self):
         savepos = self.pos
@@ -2787,9 +3090,9 @@ class HeaderParser(params.ParameterParser):
 
         Raises BadSyntax if no media-type was found."""
         self.parse_sp()
-        type = self.require_token("media-type").lower()
-        self.require_separator('/', "media-type")
-        subtype = self.require_token("media-subtype").lower()
+        type = self.require_token("media-type").lower().decode('ascii')
+        self.require_separator(SOLIDUS, "media-type")
+        subtype = self.require_token("media-subtype").lower().decode('ascii')
         self.parse_sp()
         parameters = {}
         self.parse_parameters(parameters, ignore_allsp=False, qmode='q')
@@ -2803,14 +3106,14 @@ class HeaderParser(params.ParameterParser):
         extensions = {}
         range = self.require_media_range()
         self.parse_sp()
-        if self.parse_separator(';'):
+        if self.parse_separator(SEMICOLON):
             self.parse_sp()
-            qparam = self.require_token("q parameter")
+            qparam = self.require_token("q parameter").decode('ascii')
             if qparam.lower() != 'q':
                 raise grammar.BadSyntax(
                     "Unrecognized q-parameter: %s" % qparam)
             self.parse_sp()
-            self.require_separator('=', "q parameter")
+            self.require_separator(EQUALS_SIGN, "q parameter")
             self.parse_sp()
             qvalue = self.parse_qvalue()
             if qvalue is None:
@@ -2833,7 +3136,7 @@ class HeaderParser(params.ParameterParser):
                 break
             items.append(a)
             self.parse_sp()
-            if not self.parse_separator(','):
+            if not self.parse_separator(COMMA):
                 break
         if items:
             return AcceptList(*items)
@@ -2849,16 +3152,16 @@ class HeaderParser(params.ParameterParser):
             An optional sub-class of :py:class:`AcceptToken` to create
             instead."""
         self.parse_sp()
-        token = self.require_token()
+        token = self.require_token().decode('ascii')
         self.parse_sp()
-        if self.parse_separator(';'):
+        if self.parse_separator(SEMICOLON):
             self.parse_sp()
-            qparam = self.require_token("q parameter")
+            qparam = self.require_token("q parameter").decode('ascii')
             if qparam.lower() != 'q':
                 raise grammar.BadSyntax(
                     "Unrecognized q-parameter: %s" % qparam)
             self.parse_sp()
-            self.require_separator('=', "q parameter")
+            self.require_separator(EQUALS_SIGN, "q parameter")
             self.parse_sp()
             qvalue = self.parse_qvalue()
             if qvalue is None:
@@ -2885,24 +3188,24 @@ class HeaderParser(params.ParameterParser):
                 break
             items.append(a)
             self.parse_sp()
-            if not self.parse_separator(','):
+            if not self.parse_separator(COMMA):
                 break
         return cls(*items)
 
     def require_contentrange(self):
         """Parses a :py:class:`ContentRange` instance."""
         self.parse_sp()
-        unit = self.require_token("bytes-unit")
+        unit = self.require_token("bytes-unit").decode('ascii')
         if unit.lower() != 'bytes':
             raise grammar.BadSyntax(
                 "Unrecognized unit in content-range: %s" % unit)
         self.parse_sp()
         spec = self.require_token()
         # the spec must be an entire token, '-' is not a separator
-        if spec == "*":
+        if spec == b"*":
             first_byte = last_byte = None
         else:
-            spec = spec.split('-')
+            spec = spec.split(b'-')
             if (len(spec) != 2 or not grammar.is_digits(spec[0]) or
                     not grammar.is_digits(spec[1])):
                 raise grammar.BadSyntax(
@@ -2910,10 +3213,10 @@ class HeaderParser(params.ParameterParser):
             first_byte = int(spec[0])
             last_byte = int(spec[1])
         self.parse_sp()
-        self.require_separator('/', "byte-content-range-spec")
+        self.require_separator(SOLIDUS, "byte-content-range-spec")
         self.parse_sp()
         total_len = self.require_token()
-        if total_len == "*":
+        if total_len == b"*":
             total_len = None
         elif grammar.is_digits(total_len):
             total_len = int(total_len)
@@ -2934,9 +3237,9 @@ class HeaderParser(params.ParameterParser):
             if pt is not None:
                 items.append(pt)
                 self.parse_sp()
-                if not self.parse_separator(','):
+                if not self.parse_separator(COMMA):
                     break
-            elif not self.parse_separator(','):
+            elif not self.parse_separator(COMMA):
                 break
         return items
 

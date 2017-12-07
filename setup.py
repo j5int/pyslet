@@ -24,7 +24,7 @@ else:
           url=pyslet.info.home,
           packages=['pyslet',
                     'pyslet.http',
-                    'pyslet.xml20081126',
+                    'pyslet.xml',
                     'pyslet.qtiv1',
                     'pyslet.qtiv2',
                     'pyslet.odata2'],
@@ -44,6 +44,8 @@ else:
                        'Programming Language :: Python :: 2',
                        'Programming Language :: Python :: 2.6',
                        'Programming Language :: Python :: 2.7',
+                       'Programming Language :: Python :: 3',
+                       'Programming Language :: Python :: 3.5',
                        'Topic :: Education',
                        'Topic :: Education :: '
                        'Computer Aided Instruction (CAI)',

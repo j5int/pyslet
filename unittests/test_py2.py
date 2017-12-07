@@ -1,5 +1,6 @@
 #! /usr/bin/env python
 
+import io
 import logging
 import sys
 import types
@@ -33,6 +34,10 @@ class Python2Tests(unittest.TestCase):
         udata = u"hello"
         bdata = b"hello"
         xdata = ['hello']
+        self.assertTrue(py2.is_string(data))
+        self.assertTrue(py2.is_string(udata))
+        self.assertTrue(py2.is_string(bdata))
+        self.assertFalse(py2.is_string(xdata))
         self.assertTrue(py2.is_text(data))
         self.assertTrue(py2.is_text(udata))
         if sys.version_info[0] < 3:
@@ -54,9 +59,12 @@ class Python2Tests(unittest.TestCase):
             self.assertFalse(isinstance(py2.force_text(data), type("")))
         else:
             self.assertTrue(isinstance(py2.force_text(data), type("")))
-        self.assertTrue(isinstance(py2.force_text(data), type(u"")))
         self.assertTrue(data == py2.force_text(udata))
         self.assertTrue(isinstance(py2.force_text(udata), type(u"")))
+        if sys.version_info[0] < 3:
+            self.assertFalse(isinstance(py2.force_text(udata), type("")))
+        else:
+            self.assertTrue(isinstance(py2.force_text(udata), type("")))
         if sys.version_info[0] < 3:
             # force_text will not throw an error in python 2
             pass
@@ -73,6 +81,34 @@ class Python2Tests(unittest.TestCase):
             self.fail("force_text(object)")
         except TypeError:
             pass
+        # force ascii forces strings to be ascii text
+        self.assertTrue(data == py2.force_ascii(data))
+        if sys.version_info[0] < 3:
+            self.assertFalse(isinstance(py2.force_ascii(data), type(u"")))
+        else:
+            self.assertTrue(isinstance(py2.force_ascii(data), type(u"")))
+        self.assertTrue(isinstance(py2.force_ascii(data), type("")))
+        self.assertTrue(data == py2.force_ascii(udata))
+        if sys.version_info[0] < 3:
+            self.assertFalse(isinstance(py2.force_ascii(udata), type(u"")))
+        else:
+            self.assertTrue(isinstance(py2.force_ascii(udata), type(u"")))
+        self.assertTrue(isinstance(py2.force_ascii(udata), type("")))
+        if sys.version_info[0] < 3:
+            self.assertTrue(bdata == py2.force_ascii(bdata))
+            self.assertFalse(isinstance(py2.force_ascii(bdata), type(u"")))
+        else:
+            # can't compare different types in Python 3
+            self.assertFalse(bdata == py2.force_ascii(bdata))
+            self.assertTrue(isinstance(py2.force_ascii(bdata), type(u"")))
+        self.assertTrue(isinstance(py2.force_ascii(bdata), type("")))
+        # this must work in both python 2 and 3 to prevent accidental
+        # conversion to string.
+        try:
+            py2.force_ascii(xdata)
+            self.fail("force_ascii(object)")
+        except TypeError:
+            pass
         # conversion to text
         self.assertTrue(data == py2.to_text(data))
         self.assertTrue(isinstance(py2.to_text(data), type(u"")))
@@ -85,9 +121,9 @@ class Python2Tests(unittest.TestCase):
         else:
             self.assertTrue("['hello']" == py2.to_text(xdata))
         # check the empty text constant:
-        self.assertTrue(isinstance(py2.empty_text, type(u"")))
-        self.assertFalse(py2.empty_text)
-        self.assertTrue(len(py2.empty_text) == 0)
+        self.assertTrue(isinstance(py2.uempty, type(u"")))
+        self.assertFalse(py2.uempty)
+        self.assertTrue(len(py2.uempty) == 0)
 
     def test_character(self):
         self.assertTrue(py2.character(0x2A) == "\x2A")
@@ -101,6 +137,9 @@ class Python2Tests(unittest.TestCase):
         # have values outside the ASCII range
         self.assertTrue(py2.character(py2.byte(0x2A)) == "\x2A")
         self.assertTrue(py2.character(py2.byte(0xe9)) == py2.ul("\xE9"))
+        self.assertTrue(py2.join_characters(list(u"Caf\xe9")) ==
+                        u"Caf\xe9")
+        self.assertTrue(py2.join_characters([u"Caf\xe9"]) == u"Caf\xe9")
 
     def test_byte(self):
         # bytes are different in the two versions
@@ -108,9 +147,25 @@ class Python2Tests(unittest.TestCase):
             self.assertTrue(py2.byte(0x2A) == '\x2A')
             self.assertTrue(isinstance(py2.byte(0x2A), type('*')))
             self.assertFalse(isinstance(py2.byte(0x2A), type(u'*')))
+            self.assertFalse(py2.is_byte(0x82F1))
+            self.assertFalse(py2.is_byte(256))
+            self.assertTrue(py2.is_byte('\x2A'))
+            self.assertTrue(py2.is_byte(b'\x2A'))
+            self.assertFalse(py2.is_byte(u'\x2A'))
+            self.assertFalse(py2.is_byte(u'**'))
+            self.assertTrue(py2.is_byte('**'[0]))
+            self.assertFalse(py2.is_byte(u'**'[0]))
         else:
             self.assertTrue(py2.byte(0x2A) == 0x2A)
             self.assertTrue(isinstance(py2.byte(0x2A), int))
+            self.assertTrue(py2.is_byte(0x2A))
+            self.assertFalse(py2.is_byte(0x82F1))
+            self.assertFalse(py2.is_byte('\x2A'))
+            self.assertFalse(py2.is_byte(b'\x2A'))
+            self.assertFalse(py2.is_byte('**'[0]))
+        self.assertFalse(py2.is_byte('**'))
+        self.assertFalse(py2.is_byte(b'**'))
+        self.assertTrue(py2.is_byte(b'**'[0]))
         if sys.version_info[0] < 3:
             self.assertTrue(py2.byte('*') == '\x2A')
             self.assertTrue(py2.byte('\xe9') == '\xe9')
@@ -141,8 +196,17 @@ class Python2Tests(unittest.TestCase):
             except ValueError:
                 pass
             self.assertTrue(isinstance(py2.byte('*'), int))
+        # test joining iterables of byte
         data = b"hello"
         self.assertTrue(py2.join_bytes(list(data)) == data)
+        # test byte_to_bstr
+        data = py2.byte(0x40)
+        self.assertTrue(py2.byte_to_bstr(data) == b'@')
+        self.assertTrue(isinstance(py2.byte_to_bstr(data), bytes))
+        for i in py2.range3(256):
+            b = py2.byte(i)
+            self.assertTrue(py2.byte_to_bstr(b)[0] == b)
+        # Now move on to exception handling
         try:
             py2.byte(256)
             self.fail("py2.byte(large)")
@@ -198,14 +262,13 @@ class Python2Tests(unittest.TestCase):
             def __init__(self, data):
                 self.data = data
 
-            def __lt__(self, other):
-                return self.data < other.data
-
-            def __eq__(self, other):
-                return self.data == other.data
-
-            def __le__(self, other):
-                return self.data <= other.data
+            def __cmp__(self, other):
+                if self.data < other.data:
+                    return -1
+                elif self.data == other.data:
+                    return 0
+                else:
+                    return 1
 
         # call __eq__
         self.assertTrue(X(1) == X(1))
@@ -227,6 +290,132 @@ class Python2Tests(unittest.TestCase):
         self.assertTrue(X(1) >= X(1))
         self.assertTrue(X(2) >= X(1))
         self.assertFalse(X(1) >= X(2))
+
+    def test_key_simple(self):
+        class X(py2.SortableMixin):
+            def __init__(self, data):
+                self.data = data
+
+            def sortkey(self):
+                return self.data
+
+        # call __eq__
+        self.assertTrue(X(1) == X(1))
+        self.assertFalse(X(1) == X(2))
+        # call __ne__
+        self.assertFalse(X(1) != X(1))
+        self.assertTrue(X(1) != X(2))
+        # call __lt__
+        self.assertFalse(X(1) < X(1))
+        self.assertTrue(X(1) < X(2))
+        # call __le__
+        self.assertTrue(X(1) <= X(1))
+        self.assertTrue(X(1) <= X(2))
+        self.assertFalse(X(2) <= X(1))
+        # call __gt__
+        self.assertFalse(X(1) > X(1))
+        self.assertTrue(X(2) > X(1))
+        # call __ge__
+        self.assertTrue(X(1) >= X(1))
+        self.assertTrue(X(2) >= X(1))
+        self.assertFalse(X(1) >= X(2))
+        # can't compare different types
+        # Python 2 and 3 return False if __eq__ returns NotImplemented
+        self.assertFalse(X(1) == 1)
+        # and hence True...
+        self.assertTrue(X(1) != 1)
+        try:
+            # falls back to object ids in Python 2
+            X(1) < 2 or X(1) > 2
+            self.fail("unorderable types: TypeError")
+        except TypeError:
+            pass
+        try:
+            # falls back to object ids in Python 2
+            X(1) <= 2 or X(1) >= 2
+            self.fail("unorderable types: TypeError")
+        except TypeError:
+            pass
+
+    def test_key_other(self):
+        class X(py2.SortableMixin):
+            def __init__(self, data):
+                self.data = data
+
+            def otherkey(self, other):
+                if isinstance(other, X):
+                    return other.data
+                elif isinstance(other, int):
+                    return other
+                else:
+                    return NotImplemented
+
+            def sortkey(self):
+                return self.data
+
+        # call __eq__
+        self.assertTrue(X(1) == X(1))
+        self.assertTrue(X(1) == 1)
+        self.assertFalse(X(1) == X(2))
+        self.assertFalse(X(1) == 2)
+        # call __ne__
+        self.assertFalse(X(1) != X(1))
+        self.assertFalse(X(1) != 1)
+        self.assertTrue(X(1) != X(2))
+        self.assertTrue(X(1) != 2)
+        # call __lt__
+        self.assertFalse(X(1) < X(1))
+        self.assertFalse(X(1) < 1)
+        self.assertTrue(X(1) < X(2))
+        self.assertTrue(X(1) < 2)
+        # call __le__
+        self.assertTrue(X(1) <= X(1))
+        self.assertTrue(X(1) <= 1)
+        self.assertTrue(X(1) <= X(2))
+        self.assertTrue(X(1) <= 2)
+        self.assertFalse(X(2) <= X(1))
+        self.assertFalse(X(2) <= 1)
+        # call __gt__
+        self.assertFalse(X(1) > X(1))
+        self.assertFalse(X(1) > 1)
+        self.assertTrue(X(2) > X(1))
+        self.assertTrue(X(2) > 1)
+        # call __ge__
+        self.assertTrue(X(1) >= X(1))
+        self.assertTrue(X(1) >= 1)
+        self.assertTrue(X(2) >= X(1))
+        self.assertTrue(X(2) >= 1)
+        self.assertFalse(X(1) >= X(2))
+        self.assertFalse(X(1) >= 2)
+
+    def test_bool(self):
+        class X(py2.BoolMixin):
+            def __init__(self, value):
+                self.value = value
+
+            def __bool__(self):
+                return self.value
+
+        x = X(True)
+        self.assertTrue(x)
+        x = X(False)
+        self.assertFalse(x)
+
+        class X(py2.BoolMixin):
+            def __init__(self, value):
+                self.value = value
+
+            def __len__(self):
+                return 0
+
+            def __bool__(self):
+                return self.value
+
+        # now test that __bool__ takes precedence over __len__
+        x = X(True)
+        self.assertTrue(x)
+        x = X(False)
+        self.assertFalse(x)
 
     def test_literals(self):
         data1 = "hello"
@@ -315,6 +504,18 @@ class Python2Tests(unittest.TestCase):
         except ValueError:
             pass
 
+    def test_long(self):
+        if sys.version_info[0] < 3:
+            self.assertTrue(py2.long2 is long)
+        else:
+            self.assertTrue(py2.long2 is int)
+
+    def test_buffer(self):
+        if sys.version_info[0] < 3:
+            self.assertTrue(py2.buffer2 is buffer)
+        else:
+            self.assertTrue(py2.buffer2 is bytes)
+
     def test_range(self):
         if sys.version_info[0] < 3:
             self.assertTrue(isinstance(py2.range3, type(xrange)))
@@ -328,9 +529,44 @@ class Python2Tests(unittest.TestCase):
             self.assertFalse(i in py2.dict_keys(d))
         self.assertFalse("one" in py2.dict_values(d))
         self.assertTrue("one" in py2.dict_keys(d))
+        self.assertTrue(("one", 1) in py2.dict_items(d))
+        self.assertFalse((1, "one") in py2.dict_items(d))
+        # finally, these functions return iterable objects, not lists
+        try:
+            py2.dict_keys(d)[0]
+            self.fail("dict_keys can be indexed")
+        except TypeError:
+            pass
+        try:
+            py2.dict_values(d)[0]
+            self.fail("dict_values can be indexed")
+        except TypeError:
+            pass
+        try:
+            py2.dict_items(d)[0]
+            self.fail("dict_items can be indexed")
+        except TypeError:
+            pass
 
     def test_builtins(self):
         self.assertTrue(isinstance(py2.builtins, types.ModuleType))
+
+    def test_output(self):
+        txt_out = io.StringIO()
+        save_stdout = sys.stdout
+        try:
+            sys.stdout = txt_out
+            py2.output(py2.ul("Going to the\nCaf\xe9"))
+        finally:
+            sys.stdout = save_stdout
+        self.assertTrue(txt_out.getvalue() == py2.ul("Going to the\nCaf\xe9"))
+        bin_out = io.BytesIO()
+        try:
+            sys.stdout = bin_out
+            py2.output(py2.ul("Going to the\nCaf\xe9"))
+        finally:
+            sys.stdout = save_stdout
+        self.assertTrue(bin_out.getvalue() == b"Going to the\nCaf\xc3\xa9")
 
 
 if __name__ == "__main__":

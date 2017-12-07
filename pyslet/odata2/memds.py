@@ -1,22 +1,18 @@
 #! /usr/bin/env python
 """A simple Entity store using a python dictionary"""
 
-import string
 import hashlib
 import threading
 import logging
-from StringIO import StringIO
 
-import pyslet.odata2.csdl as edm
-import pyslet.odata2.core as odata
-import pyslet.http.params as params
-import pyslet.iso8601 as iso
-
-try:
-    from cStringIO import StringIO as RStringIO
-except ImportError:
-    RStringIO = StringIO
-WStringIO = RStringIO
+from . import csdl as edm
+from . import core as odata
+from .. import iso8601 as iso
+from ..py2 import (
+    dict_items,
+    dict_keys,
+    dict_values,
+    range3)
 
 
 class InMemoryEntityStore(object):
@@ -75,14 +71,24 @@ class InMemoryEntityStore(object):
     def add_entity(self, e):
         key = e.key()
         value = []
-        for pName in e.DataKeys():
-            if not e.Selected(pName):
-                continue
-            p = e[pName]
-            if isinstance(p, edm.Complex):
+        for pname in e.data_keys():
+            p = e[pname]
+            if not e.is_selected(pname) and pname not in e.entity_set.keys:
+                # need to insert the default value
+                if isinstance(p, edm.Complex):
+                    value.append(self.get_tuple_from_complex_default(p))
+                elif isinstance(p, edm.SimpleValue):
+                    v = p.p_def()
+                    v.set_default_value()
+                    value.append(v.value)
+                else:
+                    raise RuntimeError("property not simple or complex")
+            elif isinstance(p, edm.Complex):
                 value.append(self.get_tuple_from_complex(p))
             elif isinstance(p, edm.SimpleValue):
                 value.append(p.value)
+            else:
+                raise RuntimeError("property not simple or complex")
         with self.container.lock:
             if key in self.data:
                 raise edm.ConstraintError("Duplicate key: %s", str(key))
@@ -103,7 +109,7 @@ class InMemoryEntityStore(object):
         deleted during the iteration *may* not be yielded but an entity
         inserted during the iteration will never be yielded."""
         with self.container.lock:
-            keys = self.data.keys()
+            keys = dict_keys(self.data)
         for k in keys:
             e = self.read_entity(k, select)
             if e is not None:
@@ -116,18 +122,17 @@ class InMemoryEntityStore(object):
                 return None
             e = Entity(self.entity_set, self)
             if select is not None:
-                e.Expand(None, select)
-            kv = zip(e.DataKeys(), value)
-            for pName, pValue in kv:
-                p = e[pName]
-                if (select is None or e.Selected(pName) or
-                        pName in self.entity_set.keys):
+                e.expand(None, select)
+            for pname, pvalue in zip(e.data_keys(), value):
+                p = e[pname]
+                if (select is None or e.is_selected(pname) or
+                        pname in self.entity_set.keys):
                     # for speed, check if selection is an issue first
                     # we always include the keys
                     if isinstance(p, edm.Complex):
-                        self.set_complex_from_tuple(p, pValue)
+                        self.set_complex_from_tuple(p, pvalue)
                     else:
-                        p.set_from_value(pValue)
+                        p.set_from_value(pvalue)
                 else:
                     if isinstance(p, edm.Complex):
                         p.set_null()
@@ -137,12 +142,12 @@ class InMemoryEntityStore(object):
         return e
 
     def set_complex_from_tuple(self, complex_value, t):
-        for pName, pValue in zip(complex_value.iterkeys(), t):
-            p = complex_value[pName]
+        for pname, pvalue in zip(complex_value.iterkeys(), t):
+            p = complex_value[pname]
             if isinstance(p, edm.Complex):
-                self.set_complex_from_tuple(p, pValue)
+                self.set_complex_from_tuple(p, pvalue)
             else:
-                p.set_from_value(pValue)
+                p.set_from_value(pvalue)
 
     def read_stream(self, key):
         """Returns a tuple of the entity's media stream
@@ -157,19 +162,31 @@ class InMemoryEntityStore(object):
             else:
                 return '', odata.StreamInfo(size=0)
 
-    def update_entity(self, e):
+    def update_entity(self, e, merge=True):
         # e is an EntityTypeInstance, we need to convert it to a tuple
         key = e.key()
         with self.container.lock:
             value = list(self.data[key])
             i = 0
-            for pName in e.DataKeys():
-                if e.Selected(pName):
-                    p = e[pName]
+            for pname in e.data_keys():
+                if pname in e.entity_set.keys:
+                    # always merge for key properties (no change)
+                    pass
+                elif e.is_selected(pname):
+                    p = e[pname]
                     if isinstance(p, edm.Complex):
                         value[i] = self.get_tuple_from_complex(p)
                     elif isinstance(p, edm.SimpleValue):
                         value[i] = p.value
+                elif not merge:
+                    # replace semantics, use the default value
+                    p = e[pname]
+                    if isinstance(p, edm.Complex):
+                        value[i] = self.get_tuple_from_complex_default(p)
+                    elif isinstance(p, edm.SimpleValue):
+                        v = p.p_def()
+                        v.set_default_value()
+                        value[i] = v.value
                 i = i + 1
             self.data[key] = tuple(value)
 
@@ -179,12 +196,24 @@ class InMemoryEntityStore(object):
 
     def get_tuple_from_complex(self, complex_value):
         value = []
-        for pName in complex_value.iterkeys():
-            p = complex_value[pName]
+        for pname in complex_value.iterkeys():
+            p = complex_value[pname]
             if isinstance(p, edm.Complex):
                 value.append(self.get_tuple_from_complex(p))
             else:
                 value.append(p.value)
+        return tuple(value)
+
+    def get_tuple_from_complex_default(self, complex_value):
+        value = []
+        for pname in complex_value.iterkeys():
+            p = complex_value[pname]
+            if isinstance(p, edm.Complex):
+                value.append(self.get_tuple_from_complex_default(p))
+            else:
+                v = p.p_def()
+                v.set_default_value()
+                value.append(v.value)
         return tuple(value)
 
     def start_deleting_entity(self, key):
@@ -219,9 +248,9 @@ class InMemoryEntityStore(object):
 
     def delete_entity(self, key):
         with self.container.lock:
-            for aindex in self.associations.values():
+            for aindex in dict_values(self.associations):
                 aindex.delete_hook(key)
-            for aindex in self.reverseAssociations.values():
+            for aindex in dict_values(self.reverseAssociations):
                 aindex.rdelete_hook(key)
             del self.data[key]
             if key in self.streams:
@@ -278,13 +307,13 @@ class InMemoryAssociationIndex(object):
         If the association is reversible *reverse_name* can also be used
         to bind that property in the entity set bound to
         :py:attr:`to_store`"""
-        self.from_store.entity_set.BindNavigation(
+        self.from_store.entity_set.bind_navigation(
             property_name,
             NavigationCollection,
             aindex=self,
             reverse=False)
         if reverse_name is not None:
-            self.to_store.entity_set.BindNavigation(
+            self.to_store.entity_set.bind_navigation(
                 reverse_name,
                 NavigationCollection,
                 aindex=self,
@@ -293,7 +322,7 @@ class InMemoryAssociationIndex(object):
     def bind_reverse(self, reverse_name):
         """Binds this index to *reverse_name* in the :py:attr:`to_store`"""
         if reverse_name is not None:
-            self.to_store.entity_set.BindNavigation(
+            self.to_store.entity_set.bind_navigation(
                 reverse_name,
                 NavigationCollection,
                 aindex=self,
@@ -348,20 +377,20 @@ class InMemoryAssociationIndex(object):
             pass
 
 
-class WEntityStream(StringIO):
-
-    def __init__(self, entity):
-        self.entity = entity
-        StringIO.__init__(self)
-
-    def close(self):
-        type, data = self.entity.get_stream_info()
-        if type is None:
-            type = params.APPLICATION_OCTETSTREAM
-        self.entity.set_stream(type, [self.getvalue()])
-        StringIO.close(self)
-
-
+# class WEntityStream(StringIO):
+#
+#     def __init__(self, entity):
+#         self.entity = entity
+#         StringIO.__init__(self)
+#
+#     def close(self):
+#         type, data = self.entity.get_stream_info()
+#         if type is None:
+#             type = params.APPLICATION_OCTETSTREAM
+#         self.entity.set_stream(type, [self.getvalue()])
+#         StringIO.close(self)
+#
+#
 class Entity(odata.Entity):
 
     """We override the CSDL's Entity class for legacy reasons"""
@@ -394,7 +423,7 @@ class EntityCollection(odata.EntityCollection):
         corresponding association.  This information can be used to
         suppress a constraint check (on the assumption that it has
         already been checked) by passing *from_end* directly to
-        :py:meth:`Entity.CheckNavigationConstraints`."""
+        :py:meth:`Entity.check_navigation_constraints`."""
         with self.entity_store.container.lock:
             # This is a bit clumsy, but we lock the whole container while we
             # check all constraints and perform any nested deletes
@@ -403,7 +432,7 @@ class EntityCollection(odata.EntityCollection):
             except KeyError:
                 # if the entity doesn't have a key, autogenerate one
                 # until we have one that is good
-                for i in xrange(100):
+                for i in range3(100):
                     entity.auto_key()
                     key = entity.key()
                     if not self.entity_store.test_key(key):
@@ -414,9 +443,9 @@ class EntityCollection(odata.EntityCollection):
                 logging.error("Failed to find an unused key in %s "
                               "after 100 attempts", entity.entity_set.name)
                 raise edm.EDMError("Auto-key failure" %
-                                   odata.ODataURI.FormatEntityKey(entity))
+                                   odata.ODataURI.format_entity_key(entity))
             # Check constraints
-            entity.CheckNavigationConstraints(from_end)
+            entity.check_navigation_constraints(from_end)
             self.entity_store.add_entity(entity)
             self.update_bindings(entity)
 
@@ -439,15 +468,15 @@ class EntityCollection(odata.EntityCollection):
     def __getitem__(self, key):
         e = self.entity_store.read_entity(key, self.select)
         if e is not None and self.check_filter(e):
-            e.Expand(self.expand, self.select)
+            e.expand(self.expand, self.select)
             return e
         else:
             raise KeyError
 
-    def update_entity(self, entity):
+    def update_entity(self, entity, merge=True):
         # force an error if we don't have a key
         with self.entity_store.container.lock:
-            self.entity_store.update_entity(entity)
+            self.entity_store.update_entity(entity, merge)
             # now process any bindings
             self.update_bindings(entity)
 
@@ -459,7 +488,7 @@ class EntityCollection(odata.EntityCollection):
             # we're already being deleted so do nothing
             return
         try:
-            for linkEnd, navName in self.entity_set.linkEnds.iteritems():
+            for linkEnd, navName in dict_items(self.entity_set.linkEnds):
                 if linkEnd.associationEnd.multiplicity != edm.Multiplicity.One:
                     continue
                 # there must be one of us, delete the other end with
@@ -474,7 +503,7 @@ class EntityCollection(odata.EntityCollection):
                 aindex = self.entity_store.associations.get(
                     linkEnd.parent.name, None)
                 if aindex:
-                    with aindex.to_store.entity_set.OpenCollection() as \
+                    with aindex.to_store.entity_set.open() as \
                             toCollection:
                         for to_key in aindex.get_links_from(key):
                             if navName is None and \
@@ -496,7 +525,7 @@ class EntityCollection(odata.EntityCollection):
                     aindex = self.entity_store.reverseAssociations.get(
                         linkEnd.parent.name,
                         None)
-                    with aindex.from_store.entity_set.OpenCollection() as \
+                    with aindex.from_store.entity_set.open() as \
                             from_collection:
                         for from_key in aindex.get_links_to(key):
                             if navName is None and not \
@@ -525,13 +554,13 @@ class EntityCollection(odata.EntityCollection):
                 break
             else:
                 value.append(data)
-        return string.join(value, '')
+        return b''.join(value)
 
     def new_stream(self, src, sinfo=None, key=None):
         e = self.new_entity()
         if sinfo is None:
             sinfo = odata.StreamInfo()
-        etag = e.ETagValues()
+        etag = e.etag_values()
         if len(etag) == 1 and isinstance(etag[0], edm.BinaryValue):
             h = hashlib.sha256()
             etag = etag[0]
@@ -554,7 +583,7 @@ class EntityCollection(odata.EntityCollection):
                 e.auto_key()
             else:
                 e.set_key(key)
-            for i in xrange(1000):
+            for i in range3(1000):
                 key = e.key()
                 if not self.entity_store.test_key(key):
                     break
@@ -569,7 +598,7 @@ class EntityCollection(odata.EntityCollection):
         old_data, oldinfo = self.entity_store.read_stream(key)
         if sinfo is None:
             sinfo = odata.StreamInfo()
-        etag = e.ETagValues()
+        etag = e.etag_values()
         if len(etag) == 1 and isinstance(etag[0], edm.BinaryValue):
             h = hashlib.sha256()
             etag = etag[0]
@@ -630,7 +659,7 @@ class NavigationCollection(odata.NavigationCollection):
         else:
             self.lookupMethod = self.aindex.get_links_from
             self.rLookupMethod = self.aindex.get_links_to
-        self.collection = self.entity_set.OpenCollection()
+        self.collection = self.entity_set.open()
         self.key = self.from_entity.key()
 
     def new_entity(self):
@@ -645,7 +674,7 @@ class NavigationCollection(odata.NavigationCollection):
     def insert_entity(self, entity):
         """Inserts a new *entity* into the target entity set *and*
         simultaneously creates a link to it from the source entity."""
-        with self.entity_set.OpenCollection() as baseCollection:
+        with self.entity_set.open() as baseCollection:
             baseCollection.insert_entity(entity,
                                          from_end=self.from_end.otherEnd)
             self[entity.key()] = entity
@@ -787,7 +816,7 @@ class InMemoryEntityContainer(object):
                     self.associationStorage[
                         association_set.name].bind_reverse(np.name)
                 else:
-                    target = es.NavigationTarget(np.name)
+                    target = es.get_target(np.name)
                     if target is None:
                         raise edm.ModelIncomplete(
                             "Target of navigation property %s.%s is not bound "

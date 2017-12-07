@@ -1,0 +1,10 @@
+{
+"WSGIApp": {
+    "private": "./"
+    },
+"WSGIDataApp": {
+    "metadata": "metadata.xml",
+    "secret": "password",
+    "cipher": "plaintext"
+    }
+}

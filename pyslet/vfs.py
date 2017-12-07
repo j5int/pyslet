@@ -11,12 +11,22 @@ import sys
 import tempfile
 import threading
 
-from .py2 import is_unicode, is_text, to_text, ul
-from .py2 import byte, join_bytes
-from .py2 import py2, dict_keys, range3, builtins
+from .py2 import (
+    builtins,
+    byte,
+    dict_keys,
+    force_bytes,
+    is_unicode,
+    is_text,
+    join_bytes,
+    py2,
+    range3,
+    SortableMixin,
+    to_text,
+    ul)
 
 
-class VirtualFilePath(object):
+class VirtualFilePath(SortableMixin):
 
     """Abstract class representing a virtual file system
 
@@ -206,6 +216,10 @@ class VirtualFilePath(object):
         else:
             return self.path.decode(self.codec)
 
+    def sortkey(self):
+        """Instances are sortable using character strings."""
+        return to_text(self)
+
     def join(self, *components):
         """Returns a new instance by joining path components
 
@@ -286,7 +300,7 @@ class VirtualFilePath(object):
 
         Returns a tuple of (root, ext) where root is an instance
         containing just the root file path and ext is a string of
-        characters (or bytes) representing the orignal path's extension.
+        *characters* representing the orignal path's extension.
 
         For details see Python's os.path.splitext."""
         if self.is_dirlike():
@@ -947,16 +961,20 @@ class OSFilePath(VirtualFilePath):
     codec = sys.getfilesystemencoding()
 
     #: copied from os.sep
-    sep = os.sep
+    sep = os.sep if os.path.supports_unicode_filenames else \
+        force_bytes(os.sep)
 
     #: copied from os.curdir
-    curdir = os.curdir
+    curdir = os.curdir if os.path.supports_unicode_filenames else \
+        force_bytes(os.curdir)
 
     #: copied from os.pardir
-    pardir = os.pardir
+    pardir = os.pardir if os.path.supports_unicode_filenames else \
+        force_bytes(os.pardir)
 
     #: copied from os.extsep
-    ext = os.extsep
+    ext = os.extsep if os.path.supports_unicode_filenames else \
+        force_bytes(os.extsep)
 
     drive_sep = ul(":") if os.path.supports_unicode_filenames else b":"
     """always set to ':'
@@ -1083,11 +1101,11 @@ stat_pass = os.stat
 open_pass = builtins.open
 
 
-def stat_hook(path):
+def stat_hook(path, *args, **kwargs):
     if isinstance(path, VirtualFilePath):
         return path.stat()
     else:
-        return stat_pass(path)
+        return stat_pass(path, *args, **kwargs)
 
 
 def open_hook(path, *params):

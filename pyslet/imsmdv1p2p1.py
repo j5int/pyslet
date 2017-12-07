@@ -2,21 +2,24 @@
 """This module implements the IMS LRM 1.2.1 specification defined by IMS GLC
 """
 
-import pyslet.xmlnames20091208 as xmlns
+import itertools
+
+from .pep8 import old_method
+from .xml import namespace as xmlns
+from .xml import structures as xml
 
 try:
     import vobject
 except ImportError:
     vobject = None
 
-import itertools
 
 IMSLRM_NAMESPACE = "http://www.imsglobal.org/xsd/imsmd_v1p2"
 IMSLRM_SCHEMALOCATION = "http://www.imsglobal.org/xsd/imsmd_v1p2p4.xsd"
 
 IMSLRM_NAMESPACE_ALIASES = {
-    #	"http://www.imsproject.org/metadata":"1.1",
-    #	"http://www.imsproject.org/metadata/":"1.1",
+    # "http://www.imsproject.org/metadata":"1.1",
+    # "http://www.imsproject.org/metadata/":"1.1",
     "http://www.imsproject.org/xsd/imsmd_rootv1p2": IMSLRM_NAMESPACE,
     "http://www.imsglobal.org/xsd/imsmd_rootv1p2p1": IMSLRM_NAMESPACE}
 
@@ -40,7 +43,7 @@ class LangString(LRMElement):
     def __init__(self, parent, value=None):
         LRMElement.__init__(self, parent)
         if value is not None:
-            self.SetValue(value)
+            self.set_value(value)
 
 
 class LangStringList(LRMElement):
@@ -50,35 +53,37 @@ class LangStringList(LRMElement):
         LRMElement.__init__(self, parent)
         self.LangString = []
 
-    def GetChildren(self):
+    def get_children(self):
         return iter(self.LangString)
 
-    def GetLangString(self, lang=None):
+    @old_method('GetLangString')
+    def get_lang_string(self, lang=None):
         if lang is None:
             for s in self.LangString:
-                if s.GetLang() is None:
+                if s.get_lang() is None:
                     return s
             return None
         else:
             for s in self.LangString:
-                if s.GetLang() == lang:
+                if s.get_lang() == lang:
                     return s
             lang = lang.split('-')[0]
             for s in self.LangString:
-                sLang = s.GetLang().split('-')[0]
-                if sLang == lang:
+                slang = s.get_lang().split('-')[0]
+                if slang == lang:
                     return s
         return None
 
-    def AddString(self, lang, value):
-        s = self.GetLangString(lang)
+    @old_method('AddString')
+    def add_string(self, lang, value):
+        s = self.get_lang_string(lang)
         if s is None:
-            s = self.ChildElement(self.LangStringClass)
-            s.SetValue(value)
+            s = self.add_child(self.LangStringClass)
+            s.set_value(value)
             if lang:
-                s.SetLang(lang)
+                s.set_lang(lang)
         else:
-            s.AddData('; ' + value)
+            s.add_data('; ' + value)
         return s
 
 
@@ -91,7 +96,7 @@ class LRMSource(LRMElement):
         LRMElement.__init__(self, parent)
         self.LangString = self.LangStringClass(self)
 
-    def GetChildren(self):
+    def get_children(self):
         yield self.LangString
 
 
@@ -104,7 +109,7 @@ class LRMValue(LRMElement):
         LRMElement.__init__(self, parent)
         self.LangString = self.LangStringClass(self)
 
-    def GetChildren(self):
+    def get_children(self):
         yield self.LangString
 
 
@@ -117,169 +122,89 @@ class LRMSourceValue(LRMElement):
         self.LRMSource = self.LRMSourceClass(self)
         self.LRMValue = self.LRMValueClass(self)
 
-    def GetChildren(self):
+    def get_children(self):
         yield self.LRMSource
         yield self.LRMValue
 
 
 class LOM(LRMElement):
     XMLNAME = (IMSLRM_NAMESPACE, 'lom')
-    XMLCONTENT = xmlns.ElementContent
+    XMLCONTENT = xml.ElementContent
 
     def __init__(self, parent):
         LRMElement.__init__(self, parent)
-        self.general = None
-        self.lifecycle = None
-        self.metametadata = None
-        self.technical = None
-        self.educational = None
+        self.LOMGeneral = None
+        self.LOMLifecycle = None
+        self.LOMMetaMetadata = None
+        self.LOMTechnical = None
+        self.LOMEducational = None
         self.rights = None
-        self.relations = []
-        self.annotations = []
-        self.classifications = []
+        self.LOMRelation = []
+        self.LOMAnnotation = []
+        self.LOMClassification = []
 
-    def GetChildren(self):
-        if self.general:
-            yield self.general
-        if self.lifecycle:
-            yield self.lifecycle
-        if self.metametadata:
-            yield self.metametadata
-        if self.technical:
-            yield self.technical
-        if self.educational:
-            yield self.educational
+    def get_children(self):
+        if self.LOMGeneral:
+            yield self.LOMGeneral
+        if self.LOMLifecycle:
+            yield self.LOMLifecycle
+        if self.LOMMetaMetadata:
+            yield self.LOMMetaMetadata
+        if self.LOMTechnical:
+            yield self.LOMTechnical
+        if self.LOMEducational:
+            yield self.LOMEducational
         if self.rights:
             yield self.rights
         for child in itertools.chain(
-                self.relations,
-                self.annotations,
-                self.classifications,
-                LRMElement.GetChildren(self)):
+                self.LOMRelation,
+                self.LOMAnnotation,
+                self.LOMClassification,
+                LRMElement.get_children(self)):
             yield child
-
-    def LOMGeneral(self):
-        if not self.general:
-            self.general = LOMGeneral(self)
-        return self.general
-
-    def LOMLifecycle(self):
-        if not self.lifecycle:
-            self.lifecycle = LOMLifecycle(self)
-        return self.lifecycle
-
-    def LOMMetaMetadata(self):
-        if not self.metametadata:
-            self.metametadata = LOMMetaMetadata(self)
-        return self.metametadata
-
-    def LOMTechnical(self):
-        if not self.technical:
-            self.technical = LOMTechnical(self)
-        return self.technical
-
-    def LOMEducational(self):
-        if not self.educational:
-            self.educational = LOMEducational(self)
-        return self.educational
-
-    def LOMRelation(self):
-        r = LOMRelation(self)
-        self.relations.append(r)
-        return r
-
-    def LOMAnnotation(self):
-        a = LOMAnnotation(self)
-        self.annotations.append(a)
-        return a
-
-    def LOMClassification(self):
-        c = LOMClassification(self)
-        self.classifications.append(c)
-        return c
 
 
 class Description(LangStringList):
     XMLNAME = (IMSLRM_NAMESPACE, 'description')
-    XMLCONTENT = xmlns.ElementContent
+    XMLCONTENT = xml.ElementContent
 
 
 class LOMGeneral(LRMElement):
     XMLNAME = (IMSLRM_NAMESPACE, 'general')
-    XMLCONTENT = xmlns.ElementContent
+    XMLCONTENT = xml.ElementContent
 
     DescriptionClass = Description
 
     def __init__(self, parent):
         LRMElement.__init__(self, parent)
-        self.identifier = None
-        self.title = None
-        self.catalogEntries = []
-        self.languages = []
+        self.LOMIdentifier = None
+        self.LOMTitle = None
+        self.LOMCatalogEntry = []
+        self.LOMLanguage = []
         self.Description = []
-        self.keywords = []
-        self.coverage = []
-        self.structure = None
-        self.aggregationLevel = None
+        self.LOMKeyword = []
+        self.LOMCoverage = []
+        self.LOMStructure = None
+        self.LOMAggregationLevel = None
 
-    def GetChildren(self):
-        if self.identifier:
-            yield self.identifier
-        if self.title:
-            yield self.title
+    def get_children(self):
+        if self.LOMIdentifier:
+            yield self.LOMIdentifier
+        if self.LOMTitle:
+            yield self.LOMTitle
         for child in itertools.chain(
-                self.catalogEntries,
-                self.languages,
+                self.LOMCatalogEntry,
+                self.LOMLanguage,
                 self.Description,
-                self.keywords,
-                self.coverage):
+                self.LOMKeyword,
+                self.LOMCoverage):
             yield child
-        if self.structure:
-            yield self.structure
-        if self.aggregationLevel:
-            yield self.aggregationLevel
-        for child in LRMElement.GetChildren(self):
+        if self.LOMStructure:
+            yield self.LOMStructure
+        if self.LOMAggregationLevel:
+            yield self.LOMAggregationLevel
+        for child in LRMElement.get_children(self):
             yield child
-
-    def LOMIdentifier(self):
-        if not self.identifier:
-            self.identifier = LOMIdentifier(self)
-        return self.identifier
-
-    def LOMTitle(self):
-        if not self.title:
-            self.title = LOMTitle(self)
-        return self.title
-
-    def LOMCatalogEntry(self):
-        c = LOMCatalogEntry(self)
-        self.catalogEntries.append(c)
-        return c
-
-    def LOMLanguage(self):
-        l = LOMLanguage(self)
-        self.languages.append(l)
-        return l
-
-    def LOMKeyword(self):
-        kw = LOMKeyword(self)
-        self.keywords.append(kw)
-        return kw
-
-    def LOMCoverage(self):
-        c = LOMCoverage(self)
-        self.coverage.append(c)
-        return c
-
-    def LOMStructure(self):
-        if not self.structure:
-            self.structure = LOMStructure(self)
-        return self.structure
-
-    def LOMAggregationLevel(self):
-        if not self.aggregationLevel:
-            self.aggregationLevel = LOMAggregationLevel(self)
-        return self.aggregationLevel
 
 
 class LOMIdentifier(LRMElement):
@@ -320,12 +245,13 @@ class LOMLifecycle(LRMElement):
     <xsd:sequence>
             <xsd:element ref = "version" minOccurs = "0"/>
             <xsd:element ref = "status" minOccurs = "0"/>
-            <xsd:element ref = "contribute" minOccurs = "0" maxOccurs = "unbounded"/>
+            <xsd:element ref = "contribute" minOccurs = "0"
+            maxOccurs = "unbounded"/>
             <xsd:group ref = "grp.any"/>
     </xsd:sequence>
     """
     XMLNAME = (IMSLRM_NAMESPACE, 'lifecycle')
-    XMLCONTENT = xmlns.ElementContent
+    XMLCONTENT = xml.ElementContent
 
     def __init__(self, parent):
         LRMElement.__init__(self, parent)
@@ -333,14 +259,14 @@ class LOMLifecycle(LRMElement):
         self.LOMStatus = None
         self.LOMContribute = []
 
-    def GetChildren(self):
+    def get_children(self):
         if self.LOMVersion:
             yield self.LOMVersion
         if self.LOMStatus:
             yield self.LOMStatus
         for child in itertools.chain(
                 self.LOMContribute,
-                LRMElement.GetChildren(self)):
+                LRMElement.get_children(self)):
             yield child
 
 
@@ -357,13 +283,14 @@ class LOMContribute(LRMElement):
     """
     <xsd:sequence>
             <xsd:element ref = "role"/>
-            <xsd:element ref = "centity" minOccurs = "0" maxOccurs = "unbounded"/>
+            <xsd:element ref = "centity" minOccurs = "0"
+            maxOccurs = "unbounded"/>
             <xsd:element ref = "date" minOccurs = "0"/>
             <xsd:group ref = "grp.any"/>
     </xsd:sequence>
     """
     XMLNAME = (IMSLRM_NAMESPACE, 'contribute')
-    XMLCONTENT = xmlns.ElementContent
+    XMLCONTENT = xml.ElementContent
 
     def __init__(self, parent):
         LRMElement.__init__(self, parent)
@@ -371,13 +298,13 @@ class LOMContribute(LRMElement):
         self.LOMCEntity = []
         self.LOMDate = None
 
-    def GetChildren(self):
+    def get_children(self):
         yield self.LOMRole
         for child in self.LOMCEntity:
             yield child
         if self.LOMDate:
             yield self.LOMDate
-        for child in LRMElement.GetChildren(self):
+        for child in LRMElement.get_children(self):
             yield child
 
 
@@ -390,15 +317,15 @@ class LOMCEntity(LRMElement):
     """
     """
     XMLNAME = (IMSLRM_NAMESPACE, 'centity')
-    XMLCONTENT = xmlns.ElementContent
+    XMLCONTENT = xml.ElementContent
 
     def __init__(self, parent):
         LRMElement.__init__(self, parent)
         self.LOMVCard = LOMVCard(self)
 
-    def GetChildren(self):
+    def get_children(self):
         yield self.LOMVCard
-        for child in LRMElement.GetChildren(self):
+        for child in LRMElement.get_children(self):
             yield child
 
 
@@ -409,25 +336,25 @@ class LOMVCard(LRMElement):
         LRMElement.__init__(self, parent)
         self.vcard = None
 
-    def GetValue(self):
+    def get_value(self):
         return self.vcard
 
-    def SetValue(self, vcard):
+    def set_value(self, vcard):
         self.vcard = vcard
-        LRMElement.SetValue(self, vcard.serialize())
+        LRMElement.set_value(self, vcard.serialize())
 
-    def PrettyPrint(self):
+    def can_pretty_print(self):
         """Overridden to prevent pretty-printing of the element contents."""
         return False
 
-    def GetCanonicalChildren(self):
+    def get_canonical_children(self):
         """Overridden to prevent collapsing of whitespace"""
-        return self.GetChildren()
+        return self.get_children()
 
-    def GotChildren(self):
+    def content_changed(self):
         # called when all children have been parsed
         if vobject is not None:
-            src = LRMElement.GetValue(self)
+            src = LRMElement.get_value(self)
             if src is not None and src.strip():
                 self.vcard = vobject.readOne(src)
             else:
@@ -448,10 +375,12 @@ class LOMEducational(LRMElement):
 <xsd:complexType name="educationalType" mixed="true">
   <xsd:sequence>
      <xsd:element ref="interactivitytype" minOccurs="0"/>
-     <xsd:element ref="learningresourcetype" minOccurs="0" maxOccurs="unbounded"/>
+     <xsd:element ref="learningresourcetype" minOccurs="0"
+     maxOccurs="unbounded"/>
      <xsd:element ref="interactivitylevel" minOccurs="0"/>
      <xsd:element ref="semanticdensity" minOccurs="0"/>
-     <xsd:element ref="intendedenduserrole" minOccurs="0" maxOccurs="unbounded"/>
+     <xsd:element ref="intendedenduserrole" minOccurs="0"
+     maxOccurs="unbounded"/>
      <xsd:element ref="context" minOccurs="0" maxOccurs="unbounded"/>
      <xsd:element ref="typicalagerange" minOccurs="0" maxOccurs="unbounded"/>
      <xsd:element ref="difficulty" minOccurs="0"/>
@@ -463,7 +392,7 @@ class LOMEducational(LRMElement):
 </xsd:complexType>
     """
     XMLNAME = (IMSLRM_NAMESPACE, 'educational')
-    XMLCONTENT = xmlns.ElementContent
+    XMLCONTENT = xml.ElementContent
 
     def __init__(self, parent):
         LRMElement.__init__(self, parent)
@@ -479,7 +408,7 @@ class LOMEducational(LRMElement):
         self.Description = None
         self.LOMLanguage = []
 
-    def GetChildren(self):
+    def get_children(self):
         if self.LOMInteractivityType:
             yield self.LOMInteractivityType
         for child in self.LOMLearningResourceType:
@@ -501,7 +430,7 @@ class LOMEducational(LRMElement):
             yield self.Description
         for child in itertools.chain(
                 self.LOMLanguage,
-                LRMElement.GetChildren(self)):
+                LRMElement.get_children(self)):
             yield child
 
 
@@ -547,7 +476,7 @@ class LOMRelation(LRMElement):
 
 class LOMAnnotation(LRMElement):
 
-    """ 
+    """
     <xsd:complexType name="annotationType" mixed="true">
   <xsd:sequence>
      <xsd:element ref="person" minOccurs="0"/>
@@ -558,7 +487,7 @@ class LOMAnnotation(LRMElement):
     </xsd:complexType>
     """
     XMLNAME = (IMSLRM_NAMESPACE, 'annotation')
-    XMLCONTENT = xmlns.ElementContent
+    XMLCONTENT = xml.ElementContent
 
     def __init__(self, parent):
         LRMElement.__init__(self, parent)
@@ -566,14 +495,14 @@ class LOMAnnotation(LRMElement):
         self.LOMDate = None
         self.Description = None
 
-    def GetChildren(self):
+    def get_children(self):
         if self.LOMPerson:
             yield self.LOMPerson
         if self.LOMDate:
             yield self.LOMDate
         if self.Description:
             yield self.Description
-        for child in LRMElement.GetChildren(self):
+        for child in LRMElement.get_children(self):
             yield child
 
 
@@ -585,11 +514,12 @@ classMap = {
     (IMSLRM_NAMESPACE, None): LRMElement
 }
 
-xmlns.MapClassElements(classMap, globals())
+xmlns.map_class_elements(classMap, globals())
 
 
 def get_element_class(name):
     ns, xmlname = name
     if ns in IMSLRM_NAMESPACE_ALIASES:
         ns = IMSLRM_NAMESPACE_ALIASES[ns]
-    return classMap.get((ns, xmlname), classMap.get((ns, None), xmlns.XMLNSElement))
+    return classMap.get((ns, xmlname), classMap.get((ns, None),
+                                                    xmlns.XMLNSElement))

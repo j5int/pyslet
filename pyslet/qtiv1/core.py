@@ -1,11 +1,11 @@
 #! /usr/bin/env python
 
-import pyslet.xml20081126.structures as xml
-import pyslet.xsdatatypes20041028 as xsi
-import pyslet.imsqtiv2p1 as qtiv2
-import pyslet.html40_19991224 as html
-
-import string
+from .. import html401 as html
+from ..pep8 import old_function
+from ..py2 import ul, uempty
+from ..xml import structures as xml
+from ..xml import xsdatatypes as xsi
+from ..qtiv2 import xml as qtiv2
 
 
 class QTIError(Exception):
@@ -23,45 +23,55 @@ class QTIUnimplementedError(QTIError):
 QTI_SOURCE = 'QTIv1'  # : Constant used for setting the LOM source value
 
 
-def MakeValidName(name):
+@old_function('MakeValidName')
+def make_valid_name(name):
     """This function takes a string that is supposed to match the
     production for Name in XML and forces it to comply by replacing
     illegal characters with '_'.  If name starts with a valid name
-    character but not a valid name start character, it is prefixed
-    with '_' too."""
+    character but not a valid name start character, it is prefixed with
+    '_' too.
+
+    (Also callable as MakeValidName for backwards compatibility.)"""
     if name:
-        goodName = []
-        if not xml.IsNameStartChar(name[0]):
-            goodName.append(u'_')
+        good_name = []
+        if not xml.is_name_start_char(name[0]):
+            good_name.append('_')
         for c in name:
-            if xml.IsNameChar(c):
-                goodName.append(c)
+            if xml.is_name_char(c):
+                good_name.append(c)
             else:
-                goodName.append(u'_')
-        return string.join(goodName, u'')
+                good_name.append('_')
+        return uempty.join(good_name)
     else:
-        return u'_'
+        return ul('_')
 
 
-def ParseYesNo(src):
+YES = ul('Yes')
+NO = ul('Nes')
+YES_MATCH = ul('yes')
+
+
+@old_function('ParseYesNo')
+def yn_from_str(src):
     """Returns a True/False parsed from a "Yes" / "No" string.
 
-    This function is generous in what it accepts, it will accept mixed case and
-    strips surrounding space.  It returns True if the resulting string matches
-    "yes" and False otherwise.
+    This function is generous in what it accepts, it will accept mixed
+    case and strips surrounding space.  It returns True if the resulting
+    string matches "yes" and False otherwise.
 
-    Reverses the transformation defined by :py:func:`FormatYesNo`."""
-    return src.strip().lower() == u'yes'
+    Reverses the transformation defined by :py:func:`yn_to_str`."""
+    return src.strip().lower() == YES_MATCH
 
 
-def FormatYesNo(value):
+@old_function('FormatYesNo')
+def yn_to_str(value):
     """Returns "Yes" if *value* is True, "No" otherwise.
 
-    Reverses the transformation defined by :py:func:`ParseYesNo`."""
+    Reverses the transformation defined by :py:func:`yn_from_str`."""
     if value:
-        return u'Yes'
+        return YES
     else:
-        return u'No'
+        return NO
 
 
 class Action(xsi.Enumeration):
@@ -78,7 +88,7 @@ class Action(xsi.Enumeration):
 
             Action.DEFAULT == Action.Set
 
-    For more methods see :py:class:`~pyslet.xsdatatypes20041028.Enumeration`"""
+    For more methods see :py:class:`~pyslet.xml.xsdatatypes.Enumeration`"""
     decode = {
         'Set': 1,
         'Add': 2,
@@ -86,7 +96,6 @@ class Action(xsi.Enumeration):
         'Multiply': 4,
         'Divide': 5
     }
-xsi.MakeEnumeration(Action)
 
 
 class Area(xsi.Enumeration):
@@ -103,17 +112,22 @@ class Area(xsi.Enumeration):
 
             Area.DEFAULT == Area.Ellipse
 
-    For more methods see :py:class:`~pyslet.xsdatatypes20041028.Enumeration`"""
+    For more methods see :py:class:`~pyslet.xml.xsdatatypes.Enumeration`"""
     decode = {
-        u'Ellipse': 1,
-        u'Rectangle': 2,
-        u'Bounded': 3
+        'Ellipse': 1,
+        'Rectangle': 2,
+        'Bounded': 3
     }
-xsi.MakeEnumeration(Area, u'Ellipse')
+    aliases = {
+        None: 'Ellipse'
+    }
 
 
-def MigrateV2AreaCoords(area, value, log):
+@old_function('MigrateV2AreaCoords')
+def migrate_area_to_v2(area, value, log):
     """Returns a tuple of (shape,coords object) representing the area.
+
+    (Also callable as MigrateV2AreaCoords for backwards compatibility.)
 
     *	*area* is one of the :py:class:`Area` constants.
 
@@ -124,9 +138,10 @@ def MigrateV2AreaCoords(area, value, log):
     defined and in some cases content uses a mixture of space and ','.
 
     Note also that the definition of rarea was updated in the 1.2.1 errata and
-    that affects this algorithm.  The clarification on the definition of ellipse
-    from radii to diameters might mean that some content ends up with hotspots
-    that are too small but this is safer than hotspots that are too large.
+    that affects this algorithm.  The clarification on the definition of
+    ellipse from radii to diameters might mean that some content ends up with
+    hotspots that are too small but this is safer than hotspots that are too
+    large.
 
     Example::
 
@@ -148,23 +163,24 @@ def MigrateV2AreaCoords(area, value, log):
 
             ['Warning: ellipse shape is deprecated in version 2']"""
     coords = []
-    vStr = []
+    vstr = []
     sep = 0
     for c in value:
         if c in "0123456789.":
-            if sep and vStr:
-                coords.append(int(float(string.join(vStr, ''))))
+            if sep and vstr:
+                coords.append(int(float(''.join(vstr))))
                 sep = 0
-                vStr = []
-            vStr.append(c)
+                vstr = []
+            vstr.append(c)
         else:
             sep = 1
-    if vStr:
-        coords.append(int(float(string.join(vStr, ''))))
+    if vstr:
+        coords.append(int(float(''.join(vstr))))
     if area == Area.Rectangle:
         if len(coords) < 4:
             log.append(
-                "Error: not enough coordinates for rectangle, padding with zeros")
+                "Error: not enough coordinates for rectangle,"
+                " padding with zeros")
             while len(coords) < 4:
                 coords.append(0)
         shape = qtiv2.core.Shape.rect
@@ -172,18 +188,21 @@ def MigrateV2AreaCoords(area, value, log):
             0] + coords[3] - 1, coords[1] + coords[2] - 1]
     elif area == Area.Ellipse:
         if len(coords) < 4:
-            if len(corrds) < 2:
+            if len(coords) < 2:
                 log.append(
-                    "Error: not enough coordinates to locate ellipse, padding with zero")
+                    "Error: not enough coordinates to locate ellipse,"
+                    " padding with zero")
                 while len(coords) < 2:
                     coords.append(0)
             if len(coords) == 2:
                 log.append(
-                    "Error: ellipse has no radius, treating as circule radius 4")
+                    "Error: ellipse has no radius, treating as circule"
+                    " radius 4")
                 coords = coords + [8, 8]
             elif len(coords) == 3:
                 log.append(
-                    "Error: only one radius given for ellipse, assuming circular")
+                    "Error: only one radius given for ellipse,"
+                    " assuming circular")
                 coords.append(coords[-1])
         if coords[2] == coords[3]:
             r = coords[2] // 2  # centre-pixel coordinate model again
@@ -212,14 +231,13 @@ class FeedbackStyle(xsi.Enumeration):
 
             FeedbackStyle.DEFAULT == FeedbackStyle.Complete
 
-    For more methods see :py:class:`~pyslet.xsdatatypes20041028.Enumeration`"""
+    For more methods see :py:class:`~pyslet.xml.xsdatatypes.Enumeration`"""
     decode = {
         'Complete': 1,
         'Incremental': 2,
         'Multilevel': 3,
         'Proprietary': 4
     }
-xsi.MakeEnumeration(FeedbackStyle)
 
 
 class FeedbackType(xsi.Enumeration):
@@ -236,13 +254,12 @@ class FeedbackType(xsi.Enumeration):
 
             FeedbackType.DEFAULT == FeedbackType.Response
 
-    For more methods see :py:class:`~pyslet.xsdatatypes20041028.Enumeration`"""
+    For more methods see :py:class:`~pyslet.xml.xsdatatypes.Enumeration`"""
     decode = {
         'Response': 1,
         'Solution': 2,
         'Hint': 3
     }
-xsi.MakeEnumeration(FeedbackType)
 
 
 class FIBType(xsi.Enumeration):
@@ -259,19 +276,22 @@ class FIBType(xsi.Enumeration):
 
             FIBType.DEFAULT == FIBType.String
 
-    For more methods see :py:class:`~pyslet.xsdatatypes20041028.Enumeration`"""
+    For more methods see :py:class:`~pyslet.xml.xsdatatypes.Enumeration`"""
     decode = {
-        u'String': 1,
-        u'Integer': 2,
-        u'Decimal': 3,
-        u'Scientific': 4
+        'String': 1,
+        'Integer': 2,
+        'Decimal': 3,
+        'Scientific': 4
     }
-xsi.MakeEnumeration(FIBType, u'String')
+    aliases = {
+        None: 'String'
+    }
 
 
-class MDOperator(xsi.Enumeration):
+class MDOperator(xsi.EnumerationNoCase):
 
-    """Metadata operator enumeration for :py:class:`pyslet.qtiv1.sao.SelectionMetadata`::
+    """Metadata operator enumeration for
+    :py:class:`pyslet.qtiv1.sao.SelectionMetadata`::
 
     (EQ | NEQ | LT | LTE | GT | GTE )
 
@@ -281,17 +301,15 @@ class MDOperator(xsi.Enumeration):
 
     Lower-case aliases of the constants are provided for compatibility.
 
-    For more methods see :py:class:`~pyslet.xsdatatypes20041028.Enumeration`"""
+    For more methods see :py:class:`~pyslet.xml.xsdatatypes.Enumeration`"""
     decode = {
-        u'EQ': 1,
-        u'NEQ': 2,
-        u'LT': 3,
-        u'LTE': 4,
-        u'GT': 5,
-        u'GTE': 6
+        'EQ': 1,
+        'NEQ': 2,
+        'LT': 3,
+        'LTE': 4,
+        'GT': 5,
+        'GTE': 6
     }
-xsi.MakeEnumeration(MDOperator)
-xsi.MakeLowerAliases(MDOperator)
 
 
 class NumType(xsi.Enumeration):
@@ -308,13 +326,15 @@ class NumType(xsi.Enumeration):
 
             NumType.DEFAULT == NumType.Integer
 
-    For more methods see :py:class:`~pyslet.xsdatatypes20041028.Enumeration`"""
+    For more methods see :py:class:`~pyslet.xml.xsdatatypes.Enumeration`"""
     decode = {
-        u'Integer': 1,
-        u'Decimal': 2,
-        u'Scientific': 3
+        'Integer': 1,
+        'Decimal': 2,
+        'Scientific': 3
     }
-xsi.MakeEnumeration(NumType, u'Integer')
+    aliases = {
+        None: 'Integer'
+    }
 
 
 class Orientation(xsi.Enumeration):
@@ -331,16 +351,21 @@ class Orientation(xsi.Enumeration):
 
             Orientation.DEFAULT == Orientation.Horizontal
 
-    For more methods see :py:class:`~pyslet.xsdatatypes20041028.Enumeration`"""
+    For more methods see :py:class:`~pyslet.xml.xsdatatypes.Enumeration`"""
     decode = {
-        u'Horizontal': 1,
-        u'Vertical': 2,
+        'Horizontal': 1,
+        'Vertical': 2,
     }
-xsi.MakeEnumeration(Orientation, u'Horizontal')
+    aliases = {
+        None: 'Horizontal'
+    }
 
 
-def MigrateV2Orientation(orientation):
+@old_function('MigrateV2Orientation')
+def migrate_orientation_to_v2(orientation):
     """Maps a v1 orientation onto the corresponding v2 constant.
+
+    (Also callable as MigrateV2Orientation for backwards compatibility.)
 
     Raises KeyError if *orientation* is not one of the :py:class:`Orientation`
     constants."""
@@ -360,14 +385,13 @@ class PromptType(xsi.Enumeration):
 
             PromptType.Dashline
 
-    For more methods see :py:class:`~pyslet.xsdatatypes20041028.Enumeration`"""
+    For more methods see :py:class:`~pyslet.xml.xsdatatypes.Enumeration`"""
     decode = {
-        u'Box': 1,
-        u'Dashline': 2,
-        u'Asterisk': 3,
-        u'Underline': 4
+        'Box': 1,
+        'Dashline': 2,
+        'Asterisk': 3,
+        'Underline': 4
     }
-xsi.MakeEnumeration(PromptType)
 
 
 class RCardinality(xsi.Enumeration):
@@ -384,26 +408,27 @@ class RCardinality(xsi.Enumeration):
 
             RCardinality.DEFAULT == RCardinality.Single
 
-    For more methods see :py:class:`~pyslet.xsdatatypes20041028.Enumeration`"""
+    For more methods see :py:class:`~pyslet.xml.xsdatatypes.Enumeration`"""
     decode = {
         'Single': 1,
         'Multiple': 2,
         'Ordered': 3
     }
 
-xsi.MakeEnumeration(RCardinality)
 
-
-def MigrateV2Cardinality(rCardinality):
+@old_function('MigrateV2Cardinality')
+def migrate_cardinality_to_v2(rcardinality):
     """Maps a v1 cardinality onto the corresponding v2 constant.
 
-    Raises KeyError if *rCardinality* is not one of the :py:class:`RCardinality`
-    constants."""
+    (Also callable as MigrateV2Cardinality for backwards compatiblity.)
+
+    Raises KeyError if *rcardinality* is not one of the
+    :py:class:`RCardinality` constants."""
     return {
         RCardinality.Single: qtiv2.variables.Cardinality.single,
         RCardinality.Multiple: qtiv2.variables.Cardinality.multiple,
         RCardinality.Ordered: qtiv2.variables.Cardinality.ordered
-    }[rCardinality]
+    }[rcardinality]
 
 
 TestOperator = MDOperator
@@ -415,7 +440,8 @@ class VarType(xsi.Enumeration):
 
     """vartype enumeration::
 
-    (Integer | String | Decimal | Scientific | Boolean | Enumerated | Set )  'Integer'
+        (Integer | String | Decimal | Scientific | Boolean | Enumerated |
+            Set )  'Integer'
 
     Defines constants for the above view types.  Usage example::
 
@@ -425,7 +451,7 @@ class VarType(xsi.Enumeration):
 
             VarType.DEFAULT == VarType.Integer
 
-    For more methods see :py:class:`~pyslet.xsdatatypes20041028.Enumeration`"""
+    For more methods see :py:class:`~pyslet.xml.xsdatatypes.Enumeration`"""
     decode = {
         'Integer': 1,
         'String': 2,
@@ -435,11 +461,13 @@ class VarType(xsi.Enumeration):
         'Enumerated': 5,
         'Set': 6
     }
-xsi.MakeEnumeration(VarType)
 
 
-def MigrateV2VarType(vartype, log):
+@old_function('MigrateV2VarType')
+def migrate_vartype_to_v2(vartype, log):
     """Returns the v2 BaseType representing the v1 *vartype*.
+
+    (Also callable as MigrateV2VarType for backwards compatibility.)
 
     Note that we reduce both Decimal and Scientific to the float types.  In
     version 2 the BaseType values were chosen to map onto the typical types
@@ -468,12 +496,13 @@ def MigrateV2VarType(vartype, log):
     }[vartype]
 
 
-class View(xsi.Enumeration):
+class View(xsi.EnumerationNoCase):
 
     """View enumeration::
 
-            (All | Administrator | AdminAuthority | Assessor | Author | Candidate |
-            InvigilatorProctor | Psychometrician | Scorer | Tutor )  'All'
+            (All | Administrator | AdminAuthority | Assessor | Author |
+            Candidate | InvigilatorProctor | Psychometrician | Scorer |
+            Tutor )  'All'
 
     Defines constants for the above view types.  Usage example::
 
@@ -483,34 +512,38 @@ class View(xsi.Enumeration):
 
             View.DEFAULT == View.All
 
-    In addition to the constants defined in the specification we add two aliases
-    which are in common use::
+    In addition to the constants defined in the specification we add two
+    aliases which are in common use::
 
             (Invigilator | Proctor)
 
-    For more methods see :py:class:`~pyslet.xsdatatypes20041028.Enumeration`"""
+    For more methods see :py:class:`~pyslet.xml.xsdatatypes.Enumeration`"""
     decode = {
-        u'All': 1,
-        u'Administrator': 2,
-        u'AdminAuthority': 3,
-        u'Assessor': 4,
-        u'Author': 5,
-        u'Candidate': 6,
-        u'InvigilatorProctor': 7,
-        u'Psychometrician': 8,
-        u'Scorer': 9,
-        u'Tutor': 10
+        'All': 1,
+        'Administrator': 2,
+        'AdminAuthority': 3,
+        'Assessor': 4,
+        'Author': 5,
+        'Candidate': 6,
+        'InvigilatorProctor': 7,
+        'Psychometrician': 8,
+        'Scorer': 9,
+        'Tutor': 10
     }
-xsi.MakeEnumeration(View, u'All')
-xsi.MakeEnumerationAliases(View, {
-    u'Proctor': u'InvigilatorProctor',
-    u'Invigilator': u'InvigilatorProctor'
-})
-xsi.MakeLowerAliases(View)
+    aliases = {
+        None: 'All',
+        'Proctor': 'InvigilatorProctor',
+        'proctor': 'InvigilatorProctor',
+        'Invigilator': 'InvigilatorProctor',
+        'invigilator': 'InvigilatorProctor'
+    }
 
 
-def MigrateV2View(view, log):
+@old_function('MigrateV2View')
+def migrate_view_to_v2(view, log):
     """Returns a list of v2 view values representing the v1 *view*.
+
+    (Also callable as MigrateV2View for backwards compatibility.)
 
     The use of a list as the return type enables mapping of the special value
     'All', which has no direct equivalent in version 2 other than providing all
@@ -542,7 +575,7 @@ def MigrateV2View(view, log):
     }[view]
     if warnFlag:
         log.append("Warning: changing view %s to %s" % (
-            View.EncodeValue(view), qtiv2.core.View.EncodeValueList(newView)))
+            View.to_str(view), qtiv2.core.View.list_to_str(newView)))
     return newView
 
 
@@ -550,18 +583,18 @@ class QTIElement(xml.Element):
 
     """Base class for all elements defined by the QTI specification"""
 
-    def DeclareMetadata(self, label, entry, definition=None):
+    def declare_metadata(self, label, entry, definition=None):
         """Declares a piece of metadata to be associated with the element.
 
         Most QTIElements will be contained by some type of metadata container
         that collects metadata in a format suitable for easy lookup and export
-        to other metadata formats.  The default implementation simply passes the
-        call to the parent element or, if there is no parent, the declaration is
-        ignored.
+        to other metadata formats.  The default implementation simply passes
+        the call to the parent element or, if there is no parent, the
+        declaration is ignored.
 
         For more information see :py:class:`MetadataContainer`."""
         if isinstance(self.parent, QTIElement):
-            self.parent.DeclareMetadata(label, entry, definition)
+            self.parent.declare_metadata(label, entry, definition)
         else:
             pass
 

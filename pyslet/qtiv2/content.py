@@ -1,12 +1,10 @@
 #! /usr/bin/env python
 
-import pyslet.xml20081126.structures as xml
-import pyslet.xmlnames20091208 as xmlns
-import pyslet.html40_19991224 as html
 
-import pyslet.qtiv2.core as core
-
-from types import StringTypes
+from . import core
+from .. import html401 as html
+from ..py2 import is_text
+from ..xml import structures as xml
 
 
 class BodyElement(core.QTIElement):
@@ -16,42 +14,44 @@ class BodyElement(core.QTIElement):
     elements of the content model::
 
             <xsd:attributeGroup name="bodyElement.AttrGroup">
-                    <xsd:attribute name="id" type="identifier.Type" use="optional"/>
+                    <xsd:attribute name="id" type="identifier.Type"
+                    use="optional"/>
                     <xsd:attribute name="class" use="optional">
                             <xsd:simpleType>
                                     <xsd:list itemType="styleclass.Type"/>
                             </xsd:simpleType>
                     </xsd:attribute>
                     <xsd:attribute ref="xml:lang"/>
-                    <xsd:attribute name="label" type="string256.Type" use="optional"/>
+                    <xsd:attribute name="label" type="string256.Type"
+                    use="optional"/>
             </xsd:attributeGroup>"""
     XMLATTR_id = ('id', core.ValidateIdentifier, lambda x: x)
-    XMLATTR_class = 'styleClass'
+    XMLATTR_class = ('style_class', None, None, list)
     XMLATTR_label = 'label'
 
     def __init__(self, parent):
         core.QTIElement.__init__(self, parent)
         self.id = None
-        self.styleClass = None
         self.label = None
 
-    def RenderHTML(self, parent, profile, itemState):
+    def render_html(self, parent, profile, item_state):
         """Renders this element in html form, adding nodes to *parent*.  This
         method effectively overrides
-        :py:class:`html40_19991224.XHTMLElement.RenderHTML` enabling QTI and
+        :py:class:`html401.XHTMLElement.render_html` enabling QTI and
         XHTML elements to be mixed freely.
 
         The state of the item (e.g., the values of any controls), is taken from
-        *itemState*, a :py:class:`variables.ItemSessionState` instance."""
-        raise NotImplementedError(self.__class__.__name__ + ".RenderHTML")
+        *item_state*, a :py:class:`variables.ItemSessionState` instance."""
+        raise NotImplementedError(self.__class__.__name__ + ".render_html")
 
-    def RenderHTMLChildren(self, parent, profile, itemState):
-        """Renders this element's children to an external document represented by the *parent* node"""
-        for child in self.GetChildren():
-            if type(child) in StringTypes:
-                parent.AddData(child)
+    def render_html_children(self, parent, profile, item_state):
+        """Renders this element's children to an external document represented
+        by the *parent* node"""
+        for child in self.get_children():
+            if is_text(child):
+                parent.add_data(child)
             else:
-                child.RenderHTML(parent, profile, itemState)
+                child.render_html(parent, profile, item_state)
 
 
 TextElements = {
@@ -132,16 +132,16 @@ HTMLProfile.update(ImageElement)
 HTMLProfile.update(HypertextElement)
 
 
-def FixHTMLNamespace(e):
-    """Fixes e and all children to be in the QTINamespace"""
+def fix_html_namespace(e):
+    """Fixes e and all children to be in the QTI namespace"""
     if e.ns == html.XHTML_NAMESPACE:
-        name = (core.IMSQTI_NAMESPACE, e.xmlname.lower())
-        if name in core.QTIDocument.classMap:
-            e.SetXMLName(name)
-    for e in e.GetChildren():
-        if type(e) in StringTypes:
+        name = e.xmlname.lower()
+        if name in core.QTI_HTML_PROFILE:
+            e.set_xmlname((core.IMSQTI_NAMESPACE, name))
+    for e in e.get_children():
+        if is_text(e):
             continue
-        FixHTMLNamespace(e)
+        fix_html_namespace(e)
 
 
 class ItemBody(BodyElement):
@@ -156,49 +156,97 @@ class ItemBody(BodyElement):
 
             <xsd:group name="itemBody.ContentGroup">
                     <xsd:sequence>
-                            <xsd:group ref="block.ElementGroup" minOccurs="0" maxOccurs="unbounded"/>
+                            <xsd:group ref="block.ElementGroup" minOccurs="0"
+                            maxOccurs="unbounded"/>
                     </xsd:sequence>
             </xsd:group>"""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'itemBody')
-    XMLCONTENT = xmlns.ElementContent
+    XMLCONTENT = xml.ElementContent
 
-    def ChildElement(self, childClass, name=None):
-        if issubclass(childClass, html.BlockMixin):
-            return BodyElement.ChildElement(self, childClass, name)
+    def add_child(self, child_class, name=None):
+        if issubclass(child_class, html.BlockMixin):
+            return BodyElement.add_child(self, child_class, name)
         else:
             raise core.QTIValidityError(
                 "%s (%s) in %s" %
                 (repr(name),
-                 childClass.__name__,
+                 child_class.__name__,
                  self.__class__.__name__))
 
-    def RenderHTML(self, parent, profile, itemState):
-        """Overrides :py:meth:`BodyElement.RenderHTML`, the result is always a
-        Div with class set to "itemBody".  Unlike other such method *parent* may
-        by None, in which case a new parentless Div is created."""
+    def render_html(self, parent, profile, item_state):
+        """Overrides :py:meth:`BodyElement.render_html`, the result is always a
+        Div with class set to "itemBody".  Unlike other such method *parent*
+        may by None, in which case a new parentless Div is created."""
         if parent:
-            htmlDiv = parent.ChildElement(html.Div)
+            html_div = parent.add_child(html.Div)
         else:
-            htmlDiv = html.Div(None)
-        htmlDiv.styleClass = "itemBody"
-        self.RenderHTMLChildren(htmlDiv, profile, itemState)
+            html_div = html.Div(None)
+        html_div.style_class = ["itemBody"]
+        self.render_html_children(html_div, profile, item_state)
 
 
-class FlowContainerMixin:
+class FlowContainerMixin(object):
 
     """Mixin class used for objects that can contain flows."""
 
-    def PrettyPrint(self):
-        """Deteremins if this flow-container-like object should be pretty printed.
+    def pretty_print(self):
+        """True if this object should be pretty printed.
 
         This is similar to the algorithm we use in HTML flow containers,
         suppressing pretty printing if we have inline elements (ignoring
         non-trivial data).  This could be refactored in future."""
-        for child in self.GetChildren():
-            if type(child) in StringTypes:
+        for child in self.get_children():
+            if is_text(child):
                 for c in child:
                     if not xml.is_s(c):
                         return False
             elif isinstance(child, html.InlineMixin):
                 return False
         return True
+
+
+class RubricBlock(html.BlockMixin, BodyElement):
+
+    """Represent the rubricBlock element.
+
+    <xsd:attributeGroup name="rubricBlock.AttrGroup">
+            <xsd:attributeGroup ref="simpleBlock.AttrGroup"/>
+            <xsd:attribute name="view" use="required">
+                    <xsd:simpleType>
+                            <xsd:list itemType="view.Type"/>
+                    </xsd:simpleType>
+            </xsd:attribute>
+    </xsd:attributeGroup>
+
+    <xsd:group name="rubricBlock.ContentGroup">
+            <xsd:sequence>
+                    <xsd:group ref="simpleBlock.ContentGroup"/>
+            </xsd:sequence>
+    </xsd:group>
+    """
+    XMLNAME = (core.IMSQTI_NAMESPACE, 'rubricBlock')
+    XMLATTR_view = (
+        'view', core.View.from_str_lower, core.View.to_str, dict)
+    XMLCONTENT = xml.ElementContent
+
+    def __init__(self, parent):
+        BodyElement.__init__(self, parent)
+        self.view = {}
+
+    def add_view(self, view):
+        if is_text(view):
+            view = core.View.from_str_lower(view.strip())
+        view_value = core.View.to_str(view)
+        if view_value:
+            self.view[view] = view_value
+        else:
+            raise ValueError("illegal value for view: %s" % view)
+
+    # need to constrain content to html.BlockMixin
+    def add_child(self, child_class, name=None):
+        if issubclass(child_class, html.BlockMixin):
+            return BodyElement.add_child(self, child_class, name)
+        else:
+            # This child cannot go in here
+            raise core.QTIValidityError(
+                "%s in %s" % (repr(name), self.__class__.__name__))

@@ -17,7 +17,7 @@ def suite():
     ))
 
 
-TEST_STRING = "The quick brown fox jumped over the lazy dog"
+TEST_STRING = b"The quick brown fox jumped over the lazy dog"
 
 
 class HTTP2617Tests(unittest.TestCase):
@@ -43,7 +43,7 @@ class HTTP2617Tests(unittest.TestCase):
                     response = messages.Response(req, entity_body=TEST_STRING)
                     response.set_status(200, "You got it!")
                 else:
-                    challenge = BasicChallenge(('realm', "RFC2617", True))
+                    challenge = BasicChallenge(('realm', b"RFC2617", True))
                     response = messages.Response(req)
                     response.set_status(401, "Who are you?")
                     # response.set_content_length(0)
@@ -82,11 +82,11 @@ class HTTP2617Tests(unittest.TestCase):
         self.assertTrue(c.scheme == "Basic", "Challenge scheme: %s" % c.scheme)
         self.assertTrue(c.protectionSpace is None,
                         "Challenge protection space: %s" % c.protectionSpace)
-        self.assertTrue(c["realm"] == "Default",
+        self.assertTrue(c["realm"] == b"Default",
                         "Initial challenge realm: %s" % c["realm"])
         c = BasicChallenge.from_str('Basic realm="Firewall"')
         self.assertTrue(
-            c["realm"] == "Firewall", "Parsed realm: %s" % c["realm"])
+            c["realm"] == b"Firewall", "Parsed realm: %s" % c["realm"])
         self.assertTrue(str(c) == 'Basic realm="Firewall"',
                         "Format challenge: %s" % repr(str(c)))
 
@@ -105,11 +105,74 @@ class HTTP2617Tests(unittest.TestCase):
         self.assertTrue(
             str(c) == 'Basic dXNlcjpQYXNzd29yZA==', "Format credentials")
 
+    def test_basic_session(self):
+        challenge_a = BasicChallenge(("realm", b"TestRealmA", True))
+        challenge_b = BasicChallenge(("realm", b"TestRealmB", True))
+        challenge_unknown = Challenge("Unknown")
+        c = BasicCredentials()
+        # any realm
+        c.user = "user"
+        c.password = "Password"
+        self.assertTrue(c.base is None)
+        # trade base credentials for new credentials (pre-emptive)
+        c1 = c.get_response()
+        self.assertTrue(c1 is not c)
+        self.assertTrue(c1.base is c)
+        # still applies to any realm
+        self.assertTrue(c1.realm is None)
+        self.assertTrue(str(c1) == str(c))
+        # no further challenge returns the same credentials
+        c2 = c1.get_response()
+        self.assertTrue(c2 is c1)
+        self.assertTrue(c1.base is c)
+        self.assertTrue(c1.realm is None)
+        self.assertTrue(str(c1) == str(c))
+        # any further challenge means credentials are rejected
+        self.assertTrue(c1.get_response(challenge_a) is None)
+        self.assertTrue(c1.get_response(challenge_unknown) is None)
+        # trade base credentials for new credentials in response to A
+        c1 = c.get_response(challenge_a)
+        self.assertTrue(c1 is not c)
+        self.assertTrue(c1.base is c)
+        # now applies specifically to the realm of the challenge
+        self.assertTrue(c1.realm == b"TestRealmA", repr(c1.realm))
+        self.assertTrue(str(c1) == str(c))
+        # no further challenge returns the same credentials
+        c2 = c1.get_response()
+        self.assertTrue(c2 is c1)
+        self.assertTrue(c1.base is c)
+        self.assertTrue(c1.realm == b"TestRealmA")
+        self.assertTrue(str(c1) == str(c))
+        # any further challenge means credentials are rejected
+        self.assertTrue(c1.get_response(challenge_a) is None)
+        self.assertTrue(c1.get_response(challenge_b) is None)
+        self.assertTrue(c1.get_response(challenge_unknown) is None)
+        # trade in response to mismatched scheme
+        self.assertTrue(c.get_response(challenge_unknown) is None)
+        # now upgrade our base credentials to be realm-specific
+        c.realm = b"TestRealmA"
+        # trade pre-emptively
+        c1 = c.get_response()
+        self.assertTrue(c1 is not c)
+        self.assertTrue(c1.base is c)
+        self.assertTrue(c1.realm == b"TestRealmA")
+        self.assertTrue(str(c1) == str(c))
+        # trade in response to A
+        c1 = c.get_response(challenge_a)
+        self.assertTrue(c1 is not c)
+        self.assertTrue(c1.base is c)
+        self.assertTrue(c1.realm == b"TestRealmA")
+        self.assertTrue(str(c1) == str(c))
+        # trade in response to mismatched realm
+        self.assertTrue(c.get_response(challenge_b) is None)
+        # trade in response to mismatched scheme
+        self.assertTrue(c.get_response(challenge_unknown) is None)
+
     def test_basicpaths(self):
         c = BasicCredentials()
-        self.assertTrue(len(c.pathPrefixes) == 0, "No prefixes initially")
+        self.assertTrue(len(c.path_prefixes) == 0, "No prefixes initially")
         c.add_success_path("/website/private/document")
-        self.assertTrue(len(c.pathPrefixes) == 1, "One path")
+        self.assertTrue(len(c.path_prefixes) == 1, "One path")
         self.assertTrue(c.test_path("/website/private/document"),
                         "Simple match")
         self.assertTrue(c.test_path("/website/private/undocument"),
@@ -119,7 +182,7 @@ class HTTP2617Tests(unittest.TestCase):
         self.assertFalse(c.test_path("/website/private"),
                          "Simple match doesn't extend to parent")
         c.add_success_path("/website/private2/document2")
-        self.assertTrue(len(c.pathPrefixes) == 2, "Two paths, no common root")
+        self.assertTrue(len(c.path_prefixes) == 2, "Two paths, no common root")
         self.assertTrue(
             c.test_path("/website/private/document"), "Simple match")
         self.assertTrue(
@@ -128,10 +191,10 @@ class HTTP2617Tests(unittest.TestCase):
                          "Simple match doesn't apply to parent")
         c.add_success_path("/internal/~user/secrets")
         self.assertTrue(
-            len(c.pathPrefixes) == 3, "Three paths, no common root")
+            len(c.path_prefixes) == 3, "Three paths, no common root")
         c.add_success_path("/website/private")
         self.assertTrue(
-            len(c.pathPrefixes) == 2, "Reduced to two paths with common root")
+            len(c.path_prefixes) == 2, "Reduced to two paths with common root")
         self.assertTrue(
             c.test_path("/website/private/document"), "Simple match")
         self.assertTrue(
@@ -140,7 +203,7 @@ class HTTP2617Tests(unittest.TestCase):
                          "Simple match doesn't apply to parent "
                          "(without redirect)")
         c.add_success_path("/website")
-        self.assertTrue(len(c.pathPrefixes) == 1,
+        self.assertTrue(len(c.path_prefixes) == 1,
                         "Reduced to one path with common root (no slash)")
         self.assertTrue(
             c.test_path("/website/private/document"), "Simple match")
@@ -162,7 +225,7 @@ class HTTP2617Tests(unittest.TestCase):
                         "Status in response1: %i" % response1.status)
         self.assertTrue(response1.reason == "Who are you?",
                         "Reason in response1: %s" % response1.reason)
-        self.assertTrue(request1.res_body == '',
+        self.assertTrue(request1.res_body == b'',
                         "Data in response1: %s" % request1.res_body)
         challenges = response1.get_www_authenticate()
         self.assertTrue(len(challenges) == 1 and isinstance(

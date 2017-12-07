@@ -1,8 +1,7 @@
 #! /usr/bin/env python
 
-import pyslet.xmlnames20091208 as xmlns
-
-import pyslet.qtiv2.core as core
+from ..xml import structures as xml
+from . import core
 
 
 class QTIMetadata(core.QTIElement):
@@ -11,21 +10,23 @@ class QTIMetadata(core.QTIElement):
     information. It is designed to be treated as an additional top-level
     category to augment the LOM profile::
 
-            <xsd:group name="qtiMetadata.ContentGroup">
-                    <xsd:sequence>
-                            <xsd:element ref="itemTemplate" minOccurs="0" maxOccurs="1"/>
-                            <xsd:element ref="timeDependent" minOccurs="0" maxOccurs="1"/>
-                            <xsd:element ref="composite" minOccurs="0" maxOccurs="1"/>
-                            <xsd:element ref="interactionType" minOccurs="0" maxOccurs="unbounded"/>
-                            <xsd:element ref="feedbackType" minOccurs="0" maxOccurs="1"/>
-                            <xsd:element ref="solutionAvailable" minOccurs="0" maxOccurs="1"/>
-                            <xsd:element ref="toolName" minOccurs="0" maxOccurs="1"/>
-                            <xsd:element ref="toolVersion" minOccurs="0" maxOccurs="1"/>
-                            <xsd:element ref="toolVendor" minOccurs="0" maxOccurs="1"/>
-                    </xsd:sequence>
-            </xsd:group>"""
+        <xsd:group name="qtiMetadata.ContentGroup">
+            <xsd:sequence>
+                <xsd:element ref="itemTemplate" minOccurs="0" maxOccurs="1"/>
+                <xsd:element ref="timeDependent" minOccurs="0" maxOccurs="1"/>
+                <xsd:element ref="composite" minOccurs="0" maxOccurs="1"/>
+                <xsd:element ref="interactionType" minOccurs="0"
+                    maxOccurs="unbounded"/>
+                <xsd:element ref="feedbackType" minOccurs="0" maxOccurs="1"/>
+                <xsd:element ref="solutionAvailable" minOccurs="0"
+                    maxOccurs="1"/>
+                <xsd:element ref="toolName" minOccurs="0" maxOccurs="1"/>
+                <xsd:element ref="toolVersion" minOccurs="0" maxOccurs="1"/>
+                <xsd:element ref="toolVendor" minOccurs="0" maxOccurs="1"/>
+            </xsd:sequence>
+        </xsd:group>"""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'qtiMetadata')
-    XMLCONTENT = xmlns.ElementContent
+    XMLCONTENT = xml.ElementContent
 
     def __init__(self, parent):
         core.QTIElement.__init__(self, parent)
@@ -39,7 +40,7 @@ class QTIMetadata(core.QTIElement):
         self.ToolVersion = None
         self.ToolVendor = None
 
-    def GetChildren(self):
+    def get_children(self):
         if self.ItemTemplate:
             yield self.ItemTemplate
         if self.TimeDependent:
@@ -58,7 +59,7 @@ class QTIMetadata(core.QTIElement):
             yield self.ToolVersion
         if self.ToolVendor:
             yield self.ToolVendor
-        for child in core.QTIElement.GetChildren(self):
+        for child in core.QTIElement.get_children(self):
             yield child
 
 

@@ -3,11 +3,11 @@
 
 title_name = u"Pyslet"
 name = "pyslet"
-copyright = u"\xA92008-2016, Steve Lay"
+copyright = u"\xA92008-2017, Steve Lay"
 
-major_version = "0.6"
-build_date = "20160201"
-version = "%s.%s+j5.3dev" % (major_version, build_date)
+major_version = "0.7"
+build_date = "20170805"
+version = "%s.%s" % (major_version, build_date)
 
 title = (
     "Pyslet: "

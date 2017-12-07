@@ -121,16 +121,31 @@ Compatibility comes with a cost, if you only need to support Python 3.3
 and higher (while retaining compatibility with Python 2) then you should
 use the first form and ignore these literal functions in performance
 critical code.  If you want more compatibility then define all string
-literals ahead of time, e.g., at module level.  One common case is
-provided for with the following constant::
+literals ahead of time, e.g., at module level.
 
-..  data:: empty_text
-        
-    An empty character string.  Frequently used as an object to join
-    character strings::
+Character Constants
+~~~~~~~~~~~~~~~~~~~
+
+These constants are provided to define common character strings (forcing
+the unicode type in Python 2).
+
+..  data:: uempty
+
+The empty string.
+
+..  data:: uspace
+
+Single space character, character(0x20).
+
+
+Text Functions
+~~~~~~~~~~~~~~
+
+..  function::  is_string(org)
+
+    Returns True if *arg* is either a character or binary string.
+
     
-        py2.empty_text.join(my_strings)
-
 ..  function::  is_text(arg)
 
     Returns True if *arg* is text and False otherwise.  In Python 3 this
@@ -169,6 +184,39 @@ provided for with the following constant::
     evaluated.  
 
 
+..  function::  is_ascii(arg)
+
+    Returns True if arg is of type str in both Python 2 and Python 3.
+    The only difference is that in Python 3 unicode errors will be
+    raised if arg contains non-ascii characters.  If arg is not of str
+    type then False is returned.
+    
+    This function is used to check a value in situations where unicode
+    is not expected in Python 2.
+    
+    
+..  function::  force_ascii(arg)
+
+    Returns *arg* as ascii text, converting it if necessary.  The result
+    is an object of type str, in both python 2 and python 3.  The
+    difference is that in Python 2 unicode strings are accepted and
+    forced to type str by *encoding* with the 'ascii' codec whereas in
+    Python 3 bytes instances are accepted and forced to type str by
+    *decoding* with the 'ascii' codec. 
+
+    This function is not needed very often but in some cases Python
+    interfaces required type str in Python 2 when the intention was to
+    accept ASCII text rather than arbitrary bytes.  When migrated to
+    Python 3 these interfaces can be problematic as inputs may be
+    generated as ASCII bytes rather than strings in Python 3, e.g., the
+    output of base64 encoding.
+
+
+..	autoclass:: UnicodeMixin
+	:members:
+	:show-inheritance:
+
+
 ..  function::  is_unicode(arg)
 
     Returns True if *arg* is unicode text and False otherwise.  In
@@ -185,6 +233,38 @@ provided for with the following constant::
     indexing a binary string).  Bear in mind that in Python 2 this is a
     single-character string, not an integer.  See :func:`byte` for how
     to create byte values dynamically.
+
+
+..  function::  join_characters(iterable)
+
+    Convenience function for concatenating an iterable of characters (or
+    character strings).  In Python 3 this is just::
+
+        ''.join
+
+    In Python 2 it ensures the result is a unicode string.
+
+
+Bytes
+~~~~~
+
+..  function::  to_bytes(arg)
+
+    Returns *arg* as bytes, converting it if necessary.  In Python 2 this
+    always returns a plain string and is in fact just an alias for the
+    builtin str.  In Python 3, this function is more complex.  If arg
+    is an object with a __bytes__ attribute then this is called, otherwise
+    the object is converted to a string (using str) and then encoded using
+    the 'ascii' codec.
+    
+    The behaviour of to_bytes in Python 3 may appear similar to the built
+    in bytes function but there is an important exception::
+    
+        x = 2
+        str(x) == '2'               # in python 2 and 3
+        bytes(x) == b'2'            # in python 2
+        bytes(x) == b'\x00\x00'     # in python 3
+        to_bytes(x) == b'2'         # in python 2 and 3
 
 
 ..  function::  force_bytes(arg)
@@ -215,13 +295,59 @@ provided for with the following constant::
 ..  function::  join_bytes(arg)
 
     Given an arg that iterates to yield bytes, returns a bytes object
-    containing those bytes.
+    containing those bytes.  It is important not to confuse this
+    operation with the more common joining of binary strings.  No
+    function is provided for that as the following construct works
+    as expected in both Python 2 and Python 3::
+    
+        b''.join(bstr_list)
+    
+    The usage of join_bytes can best be illustrated by the following two
+    interpreter sessions.
+
+    Python 2.7.10::
+
+        >>> from pyslet.py2 import join_bytes
+        >>> join_bytes(list(b'abc'))
+        'abc'
+        >>> b''.join(list(b'abc'))
+        'abc'
+
+    Python 3.5.1::
+
+        >>> from pyslet.py2 import join_bytes
+        >>> join_bytes(list(b'abc'))
+        b'abc'
+        >>> b''.join(list(b'abc'))
+        Traceback (most recent call last):
+          File "<stdin>", line 1, in <module>
+        TypeError: sequence item 0: expected a bytes-like object, int found
 
 
-..	autoclass:: UnicodeMixin
-	:members:
-	:show-inheritance:
+..  function::  byte_to_bstr(arg)
 
+    Given a single byte, returns a bytes object of length 1 containing
+    that byte.  This is a more efficient way of writing::
+    
+        join_bytes([arg])
+
+    In Python 2 this is a no-operation but in Python 3 it is effectively
+    the same as the above.
+
+
+Printing to stdout
+------------------
+
+..	autofunction:: output
+
+
+Numeric Definitions
+-------------------
+
+..  function:: long2
+
+    Missing from Python 3, equivalent to the builtin int.
+    
 
 Iterable Fixes 
 --------------
@@ -247,6 +373,10 @@ Python 3 made a number of changes to the way objects are iterated.
 Comparisons
 -----------
 
+..	autoclass:: SortableMixin
+	:members:
+	:show-inheritance:
+
 ..	autoclass:: CmpMixin
 	:members:
 	:show-inheritance:
@@ -262,5 +392,19 @@ of having to guess between __builtin__ (Python 2) and builtins (Python 3).
     
     Imported from urllib.request in Python 3, from urlib in Python 2.
 
+
+..  function::  urlencode(*args, **kwargs)
+
+    Imported from urllib.parse in Python 3, from urlib in Python 2.
+
+
+..  function::  urlquote(*args, **kwargs)
+
+    Imported from urllib.parse.quote in Python 3, from urlib.quote in
+    Python 2.
+
+..  function::  parse_qs(*args, **kwargs)
+
+    Imported from urllib.parse in Python 3, from urlparse in Python 2.
 
 

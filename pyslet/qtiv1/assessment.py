@@ -1,21 +1,19 @@
 #! /usr/bin/env python
 
-import pyslet.xml20081126.structures as xml
-import pyslet.xsdatatypes20041028 as xsi
-import pyslet.imsqtiv2p1 as qtiv2
+import itertools
 
-import core
-import common
-
-import string
+from . import common
+from . import core
+from ..xml import structures as xml
 
 
 class Assessment(common.QTICommentContainer):
 
     """The Assessment data structure is used to contain the exchange of test
-    data structures. It will always contain at least one Section and may contain
-    meta-data, objectives, rubric control switches, assessment-level processing,
-    feedback and selection and sequencing information for sections::
+    data structures. It will always contain at least one Section and may
+    contain meta-data, objectives, rubric control switches, assessment-level
+    processing, feedback and selection and sequencing information for
+    sections::
 
             <!ELEMENT assessment (qticomment? ,
                     duration? ,
@@ -33,7 +31,8 @@ class Assessment(common.QTICommentContainer):
                     )>
             <!ATTLIST assessment  ident CDATA  #REQUIRED
                                                        %I_Title;
-                                                       xml:lang CDATA  #IMPLIED >"""
+                                                       xml:lang CDATA
+                                                       #IMPLIED >"""
     XMLNAME = "assessment"
     XMLATTR_ident = 'ident'
     XMLATTR_title = 'title'
@@ -56,19 +55,9 @@ class Assessment(common.QTICommentContainer):
         self.QTIReference = None
         self.SectionMixin = []
 
-    def SectionRef(self):
-        child = SectionRef(self)
-        self.SectionMixin.append(child)
-        return child
-
-    def Section(self):
-        child = Section(self)
-        self.SectionMixin.append(child)
-        return child
-
-    def GetChildren(self):
+    def get_children(self):
         for child in itertools.chain(
-                QTIComment.GetChildren(self),
+                common.QTIComment.get_children(self),
                 self.QTIMetadata,
                 self.Objectives,
                 self.AssessmentControl,
@@ -89,12 +78,12 @@ class Assessment(common.QTICommentContainer):
         for child in self.SectionMixin:
             yield child
 
-    def MigrateV2(self, output):
+    def migrate_to_v2(self, output):
         """Converts this assessment to QTI v2
 
-        For details, see QuesTestInterop.MigrateV2."""
+        For details, see QuesTestInterop.migrate_to_v2."""
         for obj in self.SectionMixin:
-            obj.MigrateV2(output)
+            obj.migrate_to_v2(output)
 
 
 class AssessmentControl(common.QTICommentContainer):
@@ -106,15 +95,15 @@ class AssessmentControl(common.QTICommentContainer):
             <!ATTLIST assessmentcontrol
                     hintswitch  (Yes | No )  'Yes'
                     solutionswitch  (Yes | No )  'Yes'
-                    view	(All | Administrator | AdminAuthority | Assessor | Author |
-                                    Candidate | InvigilatorProctor | Psychometrician | Scorer |
-                                    Tutor ) 'All'
+                    view	(All | Administrator | AdminAuthority | Assessor |
+                                   Author | Candidate | InvigilatorProctor |
+                                   Psychometrician | Scorer | Tutor ) 'All'
                     feedbackswitch  (Yes | No )  'Yes' >"""
     XMLNAME = 'assessmentcontrol'
     XMLATTR_hintswitch = ('hintSwitch', core.ParseYesNo, core.FormatYesNo)
     XMLATTR_solutionswitch = (
         'solutionSwitch', core.ParseYesNo, core.FormatYesNo)
-    XMLATTR_view = ('view', core.View.DecodeLowerValue, core.View.EncodeValue)
+    XMLATTR_view = ('view', core.View.from_str_lower, core.View.to_str)
     XMLATTR_feedbackswitch = (
         'feedbackSwitch', core.ParseYesNo, core.FormatYesNo)
     XMLCONTENT = xml.ElementContent
@@ -137,20 +126,20 @@ class AssessProcExtension(core.QTIElement):
     XMLCONTENT = xml.XMLMixedContent
 
 
-class AssessFeedback(common.QTICommentContainer, common.ContentMixin):
+class AssessFeedback(common.ContentMixin, common.QTICommentContainer):
 
     """The container for the Assessment-level feedback that is to be presented
     as a result of Assessment-level processing of the user responses::
 
             <!ELEMENT assessfeedback (qticomment? , (material+ | flow_mat+))>
             <!ATTLIST assessfeedback
-                    view	(All | Administrator | AdminAuthority | Assessor | Author |
-                                    Candidate | InvigilatorProctor | Psychometrician | Scorer |
-                                    Tutor ) 'All'
+                    view	(All | Administrator | AdminAuthority | Assessor |
+                                   Author | Candidate | InvigilatorProctor |
+                                   Psychometrician | Scorer | Tutor ) 'All'
                     ident CDATA  #REQUIRED
                     title CDATA  #IMPLIED >"""
     XMLNAME = 'assessfeedback'
-    XMLATTR_view = ('view', core.View.DecodeLowerValue, core.View.EncodeValue)
+    XMLATTR_view = ('view', core.View.from_str_lower, core.View.to_str)
     XMLATTR_ident = 'ident'
     XMLATTR_title = 'title'
     XMLCONTENT = xml.ElementContent
@@ -162,13 +151,10 @@ class AssessFeedback(common.QTICommentContainer, common.ContentMixin):
         self.ident = None
         self.title = None
 
-    def GetChildren(self):
+    def get_children(self):
         return itertools.chain(
-            common.QTICommentContainer.GetChildren(self),
-            common.ContentMixin.GetContentChildren(self))
+            common.QTICommentContainer.get_children(self),
+            common.ContentMixin.get_content_children(self))
 
-    def ContentMixin(self, childClass):
-        if childClass in (common.Material, common.QTIFlowMat):
-            common.ContentMixin.ContentMixin(self, childClass)
-        else:
-            raise TypeError
+    def content_child(self, child_class):
+        return child_class in (common.Material, common.QTIFlowMat)

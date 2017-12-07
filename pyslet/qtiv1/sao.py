@@ -1,13 +1,10 @@
 #! /usr/bin/env python
 
-import pyslet.xml20081126.structures as xml
-import pyslet.xsdatatypes20041028 as xsi
-import pyslet.imsqtiv2p1 as qtiv2
+import itertools
 
-import core
-import common
-
-import string
+from . import common
+from . import core
+from ..xml import structures as xml
 
 
 class SelectionOrdering(common.QTICommentContainer):
@@ -18,7 +15,8 @@ class SelectionOrdering(common.QTICommentContainer):
     and Item objects within the parent object defines the default coverage of
     the ordering with respect to the selected objects::
 
-    <!ELEMENT selection_ordering (qticomment? , sequence_parameter* , selection* , order?)>
+    <!ELEMENT selection_ordering (qticomment? , sequence_parameter* ,
+    selection* , order?)>
     <!ATTLIST selection_ordering  sequence_type CDATA  #IMPLIED >"""
     XMLNAME = "selection_ordering"
     XMLATTR_sequence_type = 'sequenceType'
@@ -31,9 +29,9 @@ class SelectionOrdering(common.QTICommentContainer):
         self.Selection = []
         self.Order = None
 
-    def GetChildren(self):
+    def get_children(self):
         for child in itertools.chain(
-                common.QTICommentContainer.GetChildren(self),
+                common.QTICommentContainer.get_children(self),
                 self.SequenceParameter,
                 self.Selection):
             yield child
@@ -43,8 +41,8 @@ class SelectionOrdering(common.QTICommentContainer):
 
 class SequenceParameter(core.QTIElement):
 
-    """This element contains the comments that are relevant to the selection and
-    ordering structure as a whole::
+    """This element contains the comments that are relevant to the
+    selection and ordering structure as a whole::
 
     <!ELEMENT sequence_parameter (#PCDATA)>
     <!ATTLIST sequence_parameter  pname CDATA  #REQUIRED >"""
@@ -61,11 +59,13 @@ class Selection(core.QTIElement):
 
     """The <selection> element is used to express the selection rules that are
     to be applied to the identified objectbank or the set of child objects
-    contained within the parent. The full set of rules must be parsed before the
-    consistent selection can be achieved::
+    contained within the parent. The full set of rules must be parsed before
+    the consistent selection can be achieved::
 
-    <!ELEMENT selection (sourcebank_ref? , selection_number? , selection_metadata? ,
-            (and_selection | or_selection | not_selection | selection_extension)?)>"""
+    <!ELEMENT selection (sourcebank_ref? , selection_number? ,
+            selection_metadata? ,
+            (and_selection | or_selection | not_selection |
+            selection_extension)?)>"""
     XMLNAME = 'selection'
     XMLCONTENT = xml.ElementContent
 
@@ -76,7 +76,7 @@ class Selection(core.QTIElement):
         self.SelectionMetadata = None
         self.SelectionChildMixin = None
 
-    def GetChildren(self):
+    def get_children(self):
         if self.SourceBankRef:
             yield self.SourceBankRef
         if self.SelectionNumber:
@@ -101,7 +101,8 @@ class SourcebankRef(core.QTIElement):
 class SelectionNumber(core.QTIElement):
 
     """This element defines the partial selection rule i.e. chose 'x' objects
-    from the set of objects contained in the identified object or parent object.
+    from the set of objects contained in the identified object or parent
+    object.
     This data is an integer number in the range 1-4096::
 
     <!ELEMENT selection_number (#PCDATA)>"""
@@ -140,8 +141,8 @@ class SelectionMetadata(SelectionOperator):
     XMLATTR_mdname = 'mdName'
     XMLATTR_mdoperator = (
         'mdOperator',
-        core.MDOperator.DecodeLowerValue,
-        core.MDOperator.EncodeValue)
+        core.MDOperator.from_str_lower,
+        core.MDOperator.to_str)
     XMLCONTENT = xml.XMLMixedContent
 
     def __init__(self, parent):
@@ -152,12 +153,13 @@ class SelectionMetadata(SelectionOperator):
 
 class OrSelection(SelectionOperator, SelectionChildMixin):
 
-    """The <or_selection> element is used to express the selection of the object
-    if at least one of the rules is found to be relevant. It is used to select
-    objects that have particular metadata content or through the parameterized
-    extension mechanism::
+    """The <or_selection> element is used to express the selection of
+    the object if at least one of the rules is found to be relevant. It
+    is used to select objects that have particular metadata content or
+    through the parameterized extension mechanism::
 
-    <!ELEMENT or_selection (selection_metadata | and_selection | or_selection | not_selection)+>"""
+    <!ELEMENT or_selection (selection_metadata | and_selection | or_selection |
+                            not_selection)+>"""
     XMLNAME = 'or_selection'
     XMLCONTENT = xml.ElementContent
 
@@ -165,18 +167,19 @@ class OrSelection(SelectionOperator, SelectionChildMixin):
         SelectionOperator.__init__(self, parent)
         self.SelectionOperator = []
 
-    def GetChildren(self, parent):
+    def get_children(self, parent):
         return iter(self.SelectionOperator)
 
 
 class AndSelection(SelectionOperator, SelectionChildMixin):
 
-    """The <and_selection> element is used to express the selection of the
-    object if all of the contained rules are found to be 'True'. It is used to
-    select objects that have particular metadata content or through the
-    parameterized extension mechanism::
+    """The <and_selection> element is used to express the selection of
+    the object if all of the contained rules are found to be 'True'. It
+    is used to select objects that have particular metadata content or
+    through the parameterized extension mechanism::
 
-    <!ELEMENT and_selection (selection_metadata | and_selection | or_selection | not_selection)+>
+    <!ELEMENT and_selection (selection_metadata | and_selection |
+                            or_selection | not_selection)+>
     """
     XMLNAME = 'and_selection'
     XMLCONTENT = xml.ElementContent
@@ -185,7 +188,7 @@ class AndSelection(SelectionOperator, SelectionChildMixin):
         SelectionOperator.__init__(self, parent)
         self.SelectionOperator = []
 
-    def GetChildren(self, parent):
+    def get_children(self, parent):
         return iter(self.SelectionOperator)
 
 
@@ -196,7 +199,8 @@ class NotSelection(SelectionOperator, SelectionChildMixin):
     'True'. It is used to select objects that have particular metadata content
     or through the parameterized extension mechanism::
 
-    <!ELEMENT not_selection (selection_metadata | and_selection | or_selection | not_selection)>"""
+    <!ELEMENT not_selection (selection_metadata | and_selection |
+                            or_selection | not_selection)>"""
     XMLNAME = 'not_selection'
     XMLCONTENT = xml.ElementContent
 
@@ -204,7 +208,7 @@ class NotSelection(SelectionOperator, SelectionChildMixin):
         SelectionOperator.__init__(self, parent)
         self.SelectionOperator = None
 
-    def GetChildren(self, parent):
+    def get_children(self, parent):
         if self.SelectionOperator:
             yield self.SelectionOperator
 
@@ -222,8 +226,8 @@ class SelectionExtension(core.QTIElement, SelectionChildMixin):
 
 class Order(core.QTIElement):
 
-    """This element contains the ordering instructions that are to be applied to
-    the objects that have been previously selected::
+    """This element contains the ordering instructions that are to be
+    applied to the objects that have been previously selected::
 
     <!ELEMENT order (order_extension?)>
     <!ATTLIST order  order_type CDATA  #REQUIRED >
@@ -240,9 +244,9 @@ class Order(core.QTIElement):
 
 class OrderExtension(core.QTIElement):
 
-    """This element allows proprietary extensions to be made to the order rules.
-    The nature of these extensions is limited to that of the 'ANY' definition
-    for an element within the XML schema::
+    """This element allows proprietary extensions to be made to the
+    order rules. The nature of these extensions is limited to that of
+    the 'ANY' definition for an element within the XML schema::
 
     <!ELEMENT order_extension ANY>"""
     XMLNAME = "order_extension"

@@ -2,50 +2,50 @@
 """This module implements the QML specification defined by Questionmark.
 
 References:
-
 """
 
-import pyslet.xml20081126.structures as xml
-import pyslet.xsdatatypes20041028 as xsi
-import string
 import itertools
 
+from .py2 import to_text
+from .xml import structures as xml
+from .xml import xsdatatypes as xsi
 
-def ParseQuestionID(src):
+
+def questionid_from_str(src):
     result = []
     for c in src.strip():
         if c in "0123456789":
             result.append(c)
         else:
             raise ValueError("Can't parse QuestionID from %s" % src)
-    return string.join(result, '')
+    return ''.join(result)
 
 
-def FormatQuestionID(qid):
-    return ParseQuestionID(qid)
+def questionid_to_str(qid):
+    return questionid_from_str(qid)
 
 
-def ParseNameString(src):
+def name_from_str(src):
     if len(src) > 50:
         raise ValueError("NameString exceeds 50 characters: %s" % src)
     return src
 
 
-def FormatNameString(name):
-    return ParseNameString(name)
+def name_to_str(name):
+    return name_from_str(name)
 
 
-def ParseAlternativeString(src):
+def alternative_from_str(src):
     if len(src) > 100:
         raise ValueError("AlternativeString exceeds 100 characters: %s" % src)
     return src
 
 
-def FormatAlternativeString(alt):
-    return ParseAlternativeString(alt)
+def alternative_to_str(alt):
+    return alternative_from_str(alt)
 
 
-def ParseMessageString(src):
+def message_from_str(src):
     """MessageString is a simple length restricted string:
 
     <xs:simpleType name="MessageString">
@@ -58,11 +58,11 @@ def ParseMessageString(src):
     return src
 
 
-def FormatMessageString(msg):
-    return ParseMessageString(msg)
+def message_to_str(msg):
+    return message_from_str(msg)
 
 
-def ParseCeiling(src):
+def ceiling_from_str(src):
     """A simply restriction on integer:
 
     <xs:simpleType name="Ceiling">
@@ -78,16 +78,16 @@ def ParseCeiling(src):
     return value
 
 
-def FormatCeiling(value):
+def ceiling_to_str(value):
     if value < -1:
-        return unicode(-1)
+        return to_text(-1)
     elif value > 32767:
-        return unicode(32767)
+        return to_text(32767)
     else:
-        return unicode(value)
+        return to_text(value)
 
 
-def ParseFloor(src):
+def floor_from_str(src):
     """A more complex restriction on integer.  A comment in the XSD assures
     that the value 1 is valid in the schema only for legacy reasons.  In
     other words, we may encounter content with a value of 1 but we should
@@ -106,16 +106,16 @@ def ParseFloor(src):
     return value
 
 
-def FormatFloor(value):
+def floor_to_str(value):
     if value > 0:
-        return unicode(0)
+        return to_text(0)
     elif value < -100:
-        return unicode(-100)
+        return to_text(-100)
     else:
-        return unicode(value)
+        return to_text(value)
 
 
-def ParseLength(src):
+def length_from_str(src):
     """A simple restriction of integer:
 
     <xs:simpleType name="Length">
@@ -130,16 +130,16 @@ def ParseLength(src):
     return value
 
 
-def FormatLength(value):
+def length_to_str(value):
     if value < -32768:
-        return unicode(-32768)
+        return to_text(-32768)
     elif value > 32767:
-        return unicode(32767)
+        return to_text(32767)
     else:
-        return unicode(value)
+        return to_text(value)
 
 
-def ParsePositiveLength(src):
+def pve_length_from_str(src):
     """A simple restriction of integer:
 
     <xs:simpleType name="PositiveLength">
@@ -154,16 +154,16 @@ def ParsePositiveLength(src):
     return value
 
 
-def FormatPositiveLength(value):
+def pve_length_to_str(value):
     if value < 0:
-        return unicode(0)
+        return to_text(0)
     elif value > 32767:
-        return unicode(32767)
+        return to_text(32767)
     else:
-        return unicode(value)
+        return to_text(value)
 
 
-def ParseCommentHeight(src):
+def comment_height_from_str(src):
     """A simple restriction of integer:
 
     <xs:simpleType name="CommentHeight">
@@ -178,16 +178,16 @@ def ParseCommentHeight(src):
     return value
 
 
-def FormatCommentHeight(value):
+def comment_height_to_str(value):
     if value < 1:
-        return unicode(1)
+        return to_text(1)
     elif value > 40:
-        return unicode(40)
+        return to_text(40)
     else:
-        return unicode(value)
+        return to_text(value)
 
 
-def ParseCommentWidth(src):
+def comment_width_from_str(src):
     """A simple restriction of integer:
 
     <xs:simpleType name="CommentWidth">
@@ -202,16 +202,16 @@ def ParseCommentWidth(src):
     return value
 
 
-def FormatCommentWidth(value):
+def comment_width_to_str(value):
     if value < 5:
-        return unicode(5)
+        return to_text(5)
     elif value > 100:
-        return unicode(100)
+        return to_text(100)
     else:
-        return unicode(value)
+        return to_text(value)
 
 
-def ParseMaxSelect(src):
+def max_select_from_str(src):
     """A simple restriction of integer:
 
     <xs:simpleType name="MaxSelect">
@@ -226,16 +226,16 @@ def ParseMaxSelect(src):
     return value
 
 
-def FormatMaxSelect(value):
+def max_select_to_str(value):
     if value < 0:
-        return unicode(0)
+        return to_text(0)
     elif value > 40:
-        return unicode(40)
+        return to_text(40)
     else:
-        return unicode(value)
+        return to_text(value)
 
 
-def ParseMaxResponse(src):
+def max_response_from_str(src):
     """A simple restriction of integer:
 
     <xs:simpleType name="MaxResponse">
@@ -250,16 +250,16 @@ def ParseMaxResponse(src):
     return value
 
 
-def FormatMaxResponse(value):
+def max_response_to_str(value):
     if value < 1:
-        return unicode(1)
+        return to_text(1)
     elif value > 32767:
-        return unicode(32767)
+        return to_text(32767)
     else:
-        return unicode(value)
+        return to_text(value)
 
 
-def ParseTrueFalseEnum(src):
+def truefalse_from_str(src):
     """One of the strings TRUE or FALSE:
 
     <xs:simpleType name="TrueFalseEnum">
@@ -278,7 +278,7 @@ def ParseTrueFalseEnum(src):
         raise ValueError("Bad value for TrueFalseEnum: %s" % src)
 
 
-def FormatTrueFalseEnum(value):
+def truefalse_to_str(value):
     if value:
         return "TRUE"
     elif value is not None:
@@ -287,7 +287,7 @@ def FormatTrueFalseEnum(value):
         return None
 
 
-class QMLAlignEnum:
+class QMLAlignEnum(xsi.Enumeration):
     decode = {
         'Left': 1,
         'Right': 2,
@@ -295,10 +295,9 @@ class QMLAlignEnum:
         'Bottom': 4,
         'Middle': 5
     }
-xsi.MakeEnumeration(QMLAlignEnum)
 
 
-def ParseAlignEnum(value):
+def align_from_str(value):
     """Decodes a shape value from a string.
 
     <xs:simpleType name="AlignEnum">
@@ -323,11 +322,11 @@ def ParseAlignEnum(value):
             raise ValueError("Can't decode AlignEnum from %s" % value)
 
 
-def FormatAlignEnum(value):
+def align_to_str(value):
     return QMLAlignEnum.encode.get(value, None)
 
 
-class QMLShuffleEnum:
+class QMLShuffleEnum(xsi.Enumeration):
     decode = {
         'N': 1,
         'NO': 2,
@@ -338,10 +337,9 @@ class QMLShuffleEnum:
         'T': 7,
         'EXCEPT_LAST_TWO': 8
     }
-xsi.MakeEnumeration(QMLShuffleEnum)
 
 
-def ParseShuffleEnum(value):
+def shuffle_from_str(value):
     """Decodes a shape value from a string, we canonicalize to upper case.
 
     <xs:simpleType name="ShuffleEnum">
@@ -371,11 +369,11 @@ def ParseShuffleEnum(value):
         raise ValueError("Can't decode ShuffleEnum from %s" % value)
 
 
-def FormatShuffleEnum(value):
+def shuffle_to_str(value):
     return QMLShuffleEnum.encode.get(value, None)
 
 
-def ParseYesNoEnum(src):
+def yesno_from_str(src):
     """One of the strings Y, YES, N or NO:
 
     <xs:simpleType name="YesNoEnum">
@@ -396,7 +394,7 @@ def ParseYesNoEnum(src):
         raise ValueError("Bad value for YesNoEnum: %s" % src)
 
 
-def FormatYesNoEnum(value):
+def yesno_to_str(value):
     if value:
         return "YES"
     elif value is not None:
@@ -405,16 +403,15 @@ def FormatYesNoEnum(value):
         return None
 
 
-class QMLDirectionEnum:
+class QMLDirectionEnum(xsi.Enumeration):
     decode = {
         'VERT': 1,
         'HORZ': 2,
         'FLASH': 3
     }
-xsi.MakeEnumeration(QMLDirectionEnum)
 
 
-def ParseDirectionEnum(value):
+def direction_from_str(value):
     """Decodes a shape value from a string.
 
     <xs:simpleType name="DirectionEnum">
@@ -431,11 +428,11 @@ def ParseDirectionEnum(value):
         raise ValueError("Can't decode DirectionEnum from %s" % value)
 
 
-def FormatDirectionEnum(value):
+def direction_to_str(value):
     return QMLDirectionEnum.encode.get(value, None)
 
 
-def ParseMargin(src):
+def margin_from_str(src):
     """A simple restriction of integer:
 
     <xs:simpleType name="Margin">
@@ -450,13 +447,13 @@ def ParseMargin(src):
     return value
 
 
-def FormatMargin(value):
+def margin_to_str(value):
     if value < 0:
-        return unicode(0)
+        return to_text(0)
     elif value > 50:
-        return unicode(50)
+        return to_text(50)
     else:
-        return unicode(value)
+        return to_text(value)
 
 
 class QMLElement(xml.Element):
@@ -468,9 +465,9 @@ class QML(QMLElement):
 
     """QML root element.
 
-    Not defined in the document but used as a wrapper element for QML documents,
-    presumably to enable them to contain multiple QUESTION instances, as per
-    this quote from the specification...
+    Not defined in the document but used as a wrapper element for QML
+    documents, presumably to enable them to contain multiple QUESTION
+    instances, as per this quote from the specification...
 
     QML describes individual questions only. Each question defined in QML is
     independent to any other. [snip]...
@@ -481,18 +478,24 @@ class QML(QMLElement):
 
 class QMLQuestion(QMLElement):
 
-    """QML QUESSTION element which holds all question data.	
+    """QML QUESSTION element which holds all question data.
             <xs:complexType>
                     <xs:sequence minOccurs="0" maxOccurs="unbounded">
-                            <xs:element name="TAG" type="Tag" minOccurs="0" maxOccurs="unbounded"/>
-                            <xs:element name="COMMENT" type="Comment" minOccurs="0" maxOccurs="unbounded"/>
-                            <xs:element name="CONTENT" type="Content" minOccurs="0" maxOccurs="unbounded"/>
-                            <xs:element name="ANSWER" type="Answer" minOccurs="0"/>
-                            <xs:element name="OUTCOME" type="Outcome" minOccurs="0" maxOccurs="unbounded"/>
+                            <xs:element name="TAG" type="Tag" minOccurs="0"
+                            maxOccurs="unbounded"/>
+                            <xs:element name="COMMENT" type="Comment"
+                            minOccurs="0" maxOccurs="unbounded"/>
+                            <xs:element name="CONTENT" type="Content"
+                            minOccurs="0" maxOccurs="unbounded"/>
+                            <xs:element name="ANSWER" type="Answer"
+                            minOccurs="0"/>
+                            <xs:element name="OUTCOME" type="Outcome"
+                            minOccurs="0" maxOccurs="unbounded"/>
                     </xs:sequence>
                     <xs:attribute name="ID" type="QuestionID" use="optional"/>
                     <xs:attribute name="TOPIC" type="xs:string"/>
-                    <xs:attribute name="DESCRIPTION" type="DescriptionString" use="optional" default="Question Description"/>
+                    <xs:attribute name="DESCRIPTION" type="DescriptionString"
+                    use="optional" default="Question Description"/>
                     <xs:attribute name="TYPE" type="NameString"/>
                     <xs:attribute name="STATUS" type="NameString"/>
                     <xs:attribute name="CEILING" type="Ceiling"/>
@@ -502,13 +505,13 @@ class QMLQuestion(QMLElement):
             </xs:complexType>
     """
     XMLNAME = 'QUESTION'
-    XMLATTR_ID = ('qid', ParseQuestionID, FormatQuestionID)
+    XMLATTR_ID = ('qid', questionid_from_str, questionid_to_str)
     XMLATTR_TOPIC = 'topic'
     XMLATTR_DESCRIPTION = 'description'
-    XMLATTR_TYPE = ('type', ParseNameString, FormatNameString)
-    XMLATTR_STATUS = ('status', ParseNameString, FormatNameString)
-    XMLATTR_CEILING = ('ceiling', ParseCeiling, FormatCeiling)
-    XMLATTR_FLOOR = ('floor', ParseFloor, FormatFloor)
+    XMLATTR_TYPE = ('type', name_from_str, name_to_str)
+    XMLATTR_STATUS = ('status', name_from_str, name_to_str)
+    XMLATTR_CEILING = ('ceiling', ceiling_from_str, ceiling_to_str)
+    XMLATTR_FLOOR = ('floor', floor_from_str, floor_to_str)
     XMLATTR_VOICE_SERVER = 'voiceServer'
     XMLATTR_VOICE_RID = 'voiceRId'
     XMLCONTENT = xml.ElementContent
@@ -530,7 +533,7 @@ class QMLQuestion(QMLElement):
         self.QMLAnswer = None
         self.QMLOutcome = []
 
-    def GetChildren(self):
+    def get_children(self):
         for child in itertools.chain(
                 self.QMLTag,
                 self.QMLComment,
@@ -549,12 +552,13 @@ class QMLTag(QMLElement):
     <xs:complexType name="Tag">
             <xs:simpleContent>
                     <xs:extension base="NameString">
-                            <xs:attribute name="NAME" type="NameString" use="required"/>
+                            <xs:attribute name="NAME" type="NameString"
+                            use="required"/>
                     </xs:extension>
             </xs:simpleContent>
     </xs:complexType>"""
     XMLNAME = 'TAG'
-    XMLATTR_NAME = ('name', ParseNameString, FormatNameString)
+    XMLATTR_NAME = ('name', name_from_str, name_to_str)
     XMLCONTENT = xml.XMLMixedContent
 
     def __init__(self, parent):
@@ -562,15 +566,15 @@ class QMLTag(QMLElement):
         self.name = None
         self.value = None
 
-    def GetValue(self):
+    def get_value(self):
         return self.value
 
-    def SetValue(self, value):
+    def set_value(self, value):
         self.value = value
 
-    def GotChildren(self):
+    def content_changed(self):
         # called when all children have been parsed
-        self.value = ParseNameString(QMLElement.GetValue(self))
+        self.value = name_from_str(QMLElement.get_value(self))
 
 
 class QMLComment(QMLElement):
@@ -580,10 +584,14 @@ class QMLComment(QMLElement):
     <xs:complexType name="Comment">
             <xs:simpleContent>
                     <xs:extension base="xs:string">
-                            <xs:attribute name="AUTHOR" type="NameString" use="required"/>
-                            <xs:attribute name="NAME" type="NameString" use="required"/>
-                            <xs:attribute name="DATE" type="NameString" use="required"/>
-                            <xs:attribute name="TYPE" type="NameString" use="required"/>
+                            <xs:attribute name="AUTHOR" type="NameString"
+                            use="required"/>
+                            <xs:attribute name="NAME" type="NameString"
+                            use="required"/>
+                            <xs:attribute name="DATE" type="NameString"
+                            use="required"/>
+                            <xs:attribute name="TYPE" type="NameString"
+                            use="required"/>
                     </xs:extension>
             </xs:simpleContent>
     </xs:complexType>
@@ -591,10 +599,10 @@ class QMLComment(QMLElement):
     XMLNAME = 'COMMENT'
     XMLCONTENT = xml.XMLMixedContent
     SGMLCDATA = True
-    XMLATTR_AUTHOR = ('author', ParseNameString, FormatNameString)
-    XMLATTR_NAME = ('name', ParseNameString, FormatNameString)
-    XMLATTR_DATE = ('date', ParseNameString, FormatNameString)
-    XMLATTR_TYPE = ('type', ParseNameString, FormatNameString)
+    XMLATTR_AUTHOR = ('author', name_from_str, name_to_str)
+    XMLATTR_NAME = ('name', name_from_str, name_to_str)
+    XMLATTR_DATE = ('date', name_from_str, name_to_str)
+    XMLATTR_TYPE = ('type', name_from_str, name_to_str)
 
     def __init__(self, parent):
         QMLElement.__init__(self, parent)
@@ -615,19 +623,32 @@ class QMLContent(QMLAnswerThing):
     <xs:complexType name="Content">
             <xs:simpleContent>
                     <xs:extension base="xs:string">
-                            <xs:attribute name="NAME" type="NameString" use="optional"/>
-                            <xs:attribute name="TYPE" type="NameString" use="optional"/>
-                            <xs:attribute name="STYLE" type="NameString" use="optional"/>
-                            <xs:attribute name="WIDTH" type="PositiveLength" use="optional"/>
-                            <xs:attribute name="HEIGHT" type="PositiveLength" use="optional"/>
-                            <xs:attribute name="HIDDEN" type="TrueFalseEnum" use="optional"/>
-                            <xs:attribute name="AUTOSTART" type="TrueFalseEnum" use="optional"/>
-                            <xs:attribute name="LOOP" type="TrueFalseEnum" use="optional"/>
-                            <xs:attribute name="ALIGN" type="AlignEnum" use="optional"/>
-                            <xs:attribute name="VSPACE" type="Margin" use="optional"/>
-                            <xs:attribute name="HSPACE" type="Margin" use="optional"/>
-                            <xs:attribute name="BORDER" type="Margin" use="optional"/>
-                            <xs:attribute name="ALT" type="AlternativeString" use="optional"/>
+                            <xs:attribute name="NAME" type="NameString"
+                            use="optional"/>
+                            <xs:attribute name="TYPE" type="NameString"
+                            use="optional"/>
+                            <xs:attribute name="STYLE" type="NameString"
+                            use="optional"/>
+                            <xs:attribute name="WIDTH" type="PositiveLength"
+                            use="optional"/>
+                            <xs:attribute name="HEIGHT" type="PositiveLength"
+                            use="optional"/>
+                            <xs:attribute name="HIDDEN" type="TrueFalseEnum"
+                            use="optional"/>
+                            <xs:attribute name="AUTOSTART" type="TrueFalseEnum"
+                            use="optional"/>
+                            <xs:attribute name="LOOP" type="TrueFalseEnum"
+                            use="optional"/>
+                            <xs:attribute name="ALIGN" type="AlignEnum"
+                            use="optional"/>
+                            <xs:attribute name="VSPACE" type="Margin"
+                            use="optional"/>
+                            <xs:attribute name="HSPACE" type="Margin"
+                            use="optional"/>
+                            <xs:attribute name="BORDER" type="Margin"
+                            use="optional"/>
+                            <xs:attribute name="ALT" type="AlternativeString"
+                            use="optional"/>
                     </xs:extension>
             </xs:simpleContent>
     </xs:complexType>
@@ -635,19 +656,19 @@ class QMLContent(QMLAnswerThing):
     XMLNAME = 'CONTENT'
     XMLCONTENT = xml.XMLMixedContent
     SGMLCDATA = True
-    XMLATTR_NAME = ('name', ParseNameString, FormatNameString)
-    XMLATTR_TYPE = ('type', ParseNameString, FormatNameString)
-    XMLATTR_STYLE = ('style', ParseNameString, FormatNameString)
-    XMLATTR_WIDTH = ('width', ParsePositiveLength, FormatPositiveLength)
-    XMLATTR_HEIGHT = ('height', ParsePositiveLength, FormatPositiveLength)
-    XMLATTR_HIDDEN = ('hidden', ParseTrueFalseEnum, FormatTrueFalseEnum)
-    XMLATTR_AUTOSTART = ('autoStart', ParseTrueFalseEnum, FormatTrueFalseEnum)
-    XMLATTR_LOOP = ('loop', ParseTrueFalseEnum, FormatTrueFalseEnum)
-    XMLATTR_ALIGN = ('align', ParseAlignEnum, FormatAlignEnum)
-    XMLATTR_VSPACE = ('vspace', ParseMargin, FormatMargin)
-    XMLATTR_HSPACE = ('hspace', ParseMargin, FormatMargin)
-    XMLATTR_BORDER = ('border', ParseMargin, FormatMargin)
-    XMLATTR_ALT = ('alt', ParseAlternativeString, FormatAlternativeString)
+    XMLATTR_NAME = ('name', name_from_str, name_to_str)
+    XMLATTR_TYPE = ('type', name_from_str, name_to_str)
+    XMLATTR_STYLE = ('style', name_from_str, name_to_str)
+    XMLATTR_WIDTH = ('width', pve_length_from_str, pve_length_to_str)
+    XMLATTR_HEIGHT = ('height', pve_length_from_str, pve_length_to_str)
+    XMLATTR_HIDDEN = ('hidden', truefalse_from_str, truefalse_to_str)
+    XMLATTR_AUTOSTART = ('autoStart', truefalse_from_str, truefalse_to_str)
+    XMLATTR_LOOP = ('loop', truefalse_from_str, truefalse_to_str)
+    XMLATTR_ALIGN = ('align', align_from_str, align_to_str)
+    XMLATTR_VSPACE = ('vspace', margin_from_str, margin_to_str)
+    XMLATTR_HSPACE = ('hspace', margin_from_str, margin_to_str)
+    XMLATTR_BORDER = ('border', margin_from_str, margin_to_str)
+    XMLATTR_ALT = ('alt', alternative_from_str, alternative_to_str)
 
     def __init__(self, parent):
         QMLAnswerThing.__init__(self, parent)
@@ -678,30 +699,35 @@ class QMLAnswer(QMLElement):
             <xs:attribute name="QTYPE" type="NameString" use="required"/>
             <xs:attribute name="SHUFFLE" type="ShuffleEnum" use="optional"/>
             <xs:attribute name="COMMENT" type="YesNoEnum" use="optional"/>
-            <xs:attribute name="COMMENTLABEL" type="MessageString" use="optional"/>
-            <xs:attribute name="COMMENTHEIGHT" type="CommentHeight" use="optional"/>
-            <xs:attribute name="COMMENTWIDTH" type="CommentWidth" use="optional"/>
+            <xs:attribute name="COMMENTLABEL" type="MessageString"
+            use="optional"/>
+            <xs:attribute name="COMMENTHEIGHT" type="CommentHeight"
+            use="optional"/>
+            <xs:attribute name="COMMENTWIDTH" type="CommentWidth"
+            use="optional"/>
             <xs:attribute name="MAXSELECT" type="MaxSelect" use="optional"/>
             <xs:attribute name="SUBTYPE" type="DirectionEnum" use="optional"/>
             <xs:attribute name="EXTENSIONS" type="xs:string" use="optional"/>
-            <xs:attribute name="MAXRESPONSE" type="MaxResponse" use="optional"/>
+            <xs:attribute name="MAXRESPONSE" type="MaxResponse"
+            use="optional"/>
     </xs:complexType>
     """
     XMLNAME = 'ANSWER'
     XMLCONTENT = xml.ElementContent
-    XMLATTR_QTYPE = ('qType', ParseNameString, FormatNameString)
-    XMLATTR_SHUFFLE = ('shuffle', ParseShuffleEnum, FormatShuffleEnum)
-    XMLATTR_COMMENT = ('comment', ParseYesNoEnum, FormatYesNoEnum)
+    XMLATTR_QTYPE = ('qType', name_from_str, name_to_str)
+    XMLATTR_SHUFFLE = ('shuffle', shuffle_from_str, shuffle_to_str)
+    XMLATTR_COMMENT = ('comment', yesno_from_str, yesno_to_str)
     XMLATTR_COMMENTLABEL = (
-        'commentLabel', ParseMessageString, FormatMessageString)
+        'commentLabel', message_from_str, message_to_str)
     XMLATTR_COMMENTHEIGHT = (
-        'commentHeight', ParseCommentHeight, FormatCommentHeight)
+        'commentHeight', comment_height_from_str, comment_height_to_str)
     XMLATTR_COMMENTWIDTH = (
-        'commentWidth', ParseCommentWidth, FormatCommentWidth)
-    XMLATTR_MAXSELECT = ('maxSelect', ParseMaxSelect, FormatMaxSelect)
-    XMLATTR_SUBTYPE = ('subType', ParseDirectionEnum, FormatDirectionEnum)
+        'commentWidth', comment_width_from_str, comment_width_to_str)
+    XMLATTR_MAXSELECT = ('maxSelect', max_select_from_str, max_select_to_str)
+    XMLATTR_SUBTYPE = ('subType', direction_from_str, direction_to_str)
     XMLATTR_EXTENSIONS = 'extensions'
-    XMLATTR_MAXRESPONSE = ('maxResponse', ParseMaxResponse, FormatMaxResponse)
+    XMLATTR_MAXRESPONSE = ('maxResponse', max_response_from_str,
+                           max_response_to_str)
 
     def __init__(self, parent):
         QMLElement.__init__(self, parent)
@@ -717,7 +743,7 @@ class QMLAnswer(QMLElement):
         self.maxResponse = None
         self.QMLAnswerThing = []
 
-    def GetChildren(self):
+    def get_children(self):
         for child in self.QMLAnswerThing:
             yield child
 
@@ -728,19 +754,21 @@ class QMLChoice(QMLAnswerThing):
 
     <xs:complexType name="Choice">
             <xs:sequence>
-                    <xs:element name="OPTION" type="Option" minOccurs="0" maxOccurs="unbounded"/>
+                    <xs:element name="OPTION" type="Option" minOccurs="0"
+                    maxOccurs="unbounded"/>
                     <xs:element name="CONTENT" type="Content"/>
             </xs:sequence>
             <xs:attribute name="ID" type="NameString" use="optional"/>
-            <xs:attribute name="MAXCHARS" type="PositiveLength" use="optional"/>
+            <xs:attribute name="MAXCHARS" type="PositiveLength"
+            use="optional"/>
             <xs:attribute name="SCROLL" type="DirectionEnum" use="optional"/>
     </xs:complexType>
     """
     XMLNAME = 'CHOICE'
     XMLCONTENT = xml.ElementContent
-    XMLATTR_ID = ('cid', ParseNameString, FormatNameString)
-    XMLATTR_MAXCHARS = ('maxChars', ParsePositiveLength, FormatPositiveLength)
-    XMLATTR_SCROLL = ('scroll', ParseDirectionEnum, FormatDirectionEnum)
+    XMLATTR_ID = ('cid', name_from_str, name_to_str)
+    XMLATTR_MAXCHARS = ('maxChars', pve_length_from_str, pve_length_to_str)
+    XMLATTR_SCROLL = ('scroll', direction_from_str, direction_to_str)
 
     def __init__(self, parent):
         QMLAnswerThing.__init__(self, parent)
@@ -750,7 +778,7 @@ class QMLChoice(QMLAnswerThing):
         self.QMLOption = []
         self.QMLContent = QMLContent(self)
 
-    def GetChildren(self):
+    def get_children(self):
         for child in self.QMLOption:
             yield child
         yield self.QMLContent
@@ -763,14 +791,15 @@ class QMLOption(QMLElement):
     <xs:complexType name="Option">
             <xs:simpleContent>
                     <xs:extension base="xs:string">
-                            <xs:attribute name="VISIBLE" type="YesNoEnum" use="optional"/>
+                            <xs:attribute name="VISIBLE" type="YesNoEnum"
+                            use="optional"/>
                     </xs:extension>
             </xs:simpleContent>
     </xs:complexType>
     """
     XMLNAME = 'OPTION'
     XMLCONTENT = xml.XMLMixedContent
-    XMLATTR_VISIBLE = ('visible', ParseYesNoEnum, FormatYesNoEnum)
+    XMLATTR_VISIBLE = ('visible', yesno_from_str, yesno_to_str)
 
     def __init__(self, parent):
         QMLElement.__init__(self, parent)
@@ -794,11 +823,11 @@ class QMLOutcome(QMLElement):
     """
     XMLNAME = 'OUTCOME'
     XMLCONTENT = xml.ElementContent
-    XMLATTR_ID = ('oid', ParseNameString, FormatNameString)
-    XMLATTR_SCORE = ('length', ParseLength, FormatLength)
-    XMLATTR_ADD = ('add', ParseLength, FormatLength)
+    XMLATTR_ID = ('oid', name_from_str, name_to_str)
+    XMLATTR_SCORE = ('length', length_from_str, length_to_str)
+    XMLATTR_ADD = ('add', length_from_str, length_to_str)
     XMLATTR_CONTINTUE = (
-        'continueFlag', ParseTrueFalseEnum, FormatTrueFalseEnum)
+        'continueFlag', truefalse_from_str, truefalse_to_str)
 
     def __init__(self, parent):
         QMLElement.__init__(self, parent)
@@ -809,7 +838,7 @@ class QMLOutcome(QMLElement):
         self.QMLCondition = QMLCondition(self)
         self.QMLContent = QMLContent(self)
 
-    def GetChildren(self):
+    def get_children(self):
         yield self.QMLCondition
         yield self.QMLContent
 
@@ -828,16 +857,19 @@ class QMLDocument(xml.Document):
         xml.Document.__init__(self, **args)
 
     classMap = {}
-    """classMap is a mapping from element names to the class object that will be
-	used to represent them."""
+    """classMap is a mapping from element names to the class object that
+    will be used to represent them."""
 
     def get_element_class(self, name):
-        """Returns the class to use to represent an element with the given name.
+        """Returns the class to use to represent an element with the
+        given name.
 
-        This method is used by the XML parser.  The class object is looked up in
-        :py:attr:`classMap`, if no specialized class is found then the general
-        :py:class:`pyslet.xml20081126.Element` class is returned."""
-        return QMLDocument.classMap.get(name, QMLDocument.classMap.get(None, xml.Element))
+        This method is used by the XML parser.  The class object is
+        looked up in :py:attr:`classMap`, if no specialized class is
+        found then the general :py:class:`pyslet.xml.structures.Element`
+        class is returned."""
+        return QMLDocument.classMap.get(
+            name, QMLDocument.classMap.get(None, xml.Element))
 
 
-xml.MapClassElements(QMLDocument.classMap, globals())
+xml.map_class_elements(QMLDocument.classMap, globals())

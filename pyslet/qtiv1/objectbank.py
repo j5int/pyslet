@@ -1,13 +1,7 @@
 #! /usr/bin/env python
 
-import pyslet.xml20081126.structures as xml
-import pyslet.xsdatatypes20041028 as xsi
-import pyslet.imsqtiv2p1 as qtiv2
-
-import core
-import common
-
-import string
+from . import common
+from ..xml import structures as xml
 
 
 class ObjectBank(common.MetadataContainerMixin, common.QTICommentContainer):
@@ -28,6 +22,6 @@ class ObjectBank(common.MetadataContainerMixin, common.QTICommentContainer):
         self.QTIMetadata = []
         self.ObjectMixin = []
 
-    def MigrateV2(self, output):
+    def migrate_to_v2(self, output):
         for sectionOrItem in self.ObjectMixin:
-            sectionOrItem.MigrateV2(output)
+            sectionOrItem.migrate_to_v2(output)

@@ -1,166 +1,28 @@
 #! /usr/bin/env python
 
-import unittest
+import io
 import logging
 import random
-from StringIO import StringIO
+import unittest
 
 import pyslet.http.grammar as grammar
 import pyslet.http.params as params
-import pyslet.http.server as server
+
+from pyslet.py2 import is_string
+from pyslet.py26 import RawIOBase
 
 from pyslet.http.messages import *       # noqa
 
 
 def suite():
     return unittest.TestSuite((
-        unittest.makeSuite(BufferedEntityWrapperTests, 'test'),
         unittest.makeSuite(MessageTests, 'test'),
+        unittest.makeSuite(RecvWrapperTests, 'test'),
+        unittest.makeSuite(SendWrapperTests, 'test'),
         unittest.makeSuite(ChunkedTests, 'test'),
+        unittest.makeSuite(WSGITests, 'test'),
         unittest.makeSuite(HeaderTests, 'test'),
     ))
-
-
-class BufferedEntityWrapperTests(unittest.TestCase):
-
-    def test_goodsize(self):
-        data = "How long is a piece of string?"
-        src = StringIO(data)
-        # default buffer is larger than src
-        b = BufferedEntityWrapper(src)
-        self.assertTrue(isinstance(b, io.RawIOBase))
-        self.assertTrue(b.readable())
-        self.assertFalse(b.writable())
-        self.assertTrue(b.seekable())
-        self.assertTrue(b.length == len(data))
-        pos = b.tell()
-        self.assertTrue(pos == 0, "buffer starts at beginning of stream")
-        for i in xrange(100):
-            # check seek and read
-            newpos = random.randint(0, len(data) + 1)
-            rlen = random.randint(0, len(data) + 1)
-            whence = random.choice((io.SEEK_SET, io.SEEK_CUR, io.SEEK_END))
-            if whence == io.SEEK_CUR:
-                adj = newpos - pos
-            elif whence == io.SEEK_END:
-                adj = newpos - len(data)
-            elif whence == io.SEEK_SET:
-                adj = newpos
-            b.seek(adj, whence)
-            self.assertTrue(b.tell() == newpos,
-                            "Expected %i found %i" % (newpos, b.tell()))
-            pos = newpos
-            xlen = max(0, min(len(data) - pos, rlen))
-            rdata = b.read(rlen)
-            self.assertTrue(len(rdata) == xlen)
-            self.assertTrue(rdata == data[pos:pos + rlen])
-            pos += xlen
-
-    def test_badsize(self):
-        data = "How long is a piece of string?"
-        src = StringIO(data)
-        # make buffer smaller than src
-        b = BufferedEntityWrapper(src, len(data) // 2)
-        self.assertTrue(isinstance(b, io.RawIOBase))
-        self.assertTrue(b.readable())
-        self.assertFalse(b.writable())
-        self.assertFalse(b.seekable())
-        self.assertTrue(b.length is None)
-        buff = []
-        while True:
-            rdata = b.read(7)
-            if rdata == '':
-                break
-            else:
-                buff.append(rdata)
-        result = string.join(buff, '')
-        self.assertTrue(result == data, repr(result))
-        # now read to align with buffer size
-        src.seek(0)
-        b = BufferedEntityWrapper(src, 10)
-        buff = []
-        while True:
-            rdata = b.read(5)
-            if rdata == '':
-                break
-            else:
-                buff.append(rdata)
-        result = string.join(buff, '')
-        self.assertTrue(result == data, repr(result))
-        # now read exactly buffer size
-        src.seek(0)
-        b = BufferedEntityWrapper(src, 10)
-        buff = []
-        while True:
-            rdata = b.read(10)
-            if rdata == '':
-                break
-            else:
-                buff.append(rdata)
-        result = string.join(buff, '')
-        self.assertTrue(result == data, repr(result))
-
-    def test_boundarysize(self):
-        data = "How long is a piece of string?"
-        src = StringIO(data)
-        # make buffer same length as src
-        b = BufferedEntityWrapper(src, len(data))
-        self.assertTrue(isinstance(b, io.RawIOBase))
-        self.assertTrue(b.readable())
-        self.assertFalse(b.writable())
-        # not seekable as we can't peek past the end of src so it counts
-        # as an overflow.
-        self.assertFalse(b.seekable())
-        self.assertTrue(b.length is None)
-        # treat as readall
-        result = b.read()
-        self.assertTrue(result == data, repr(result))
-
-    def test_blocked(self):
-        data = "How long is a piece of string?"
-        src = server.Pipe(rblocking=False, name="test_blocked")
-        src.write(data)
-        # no eof, default buffer size will trigger block
-        b = BufferedEntityWrapper(src)
-        self.assertTrue(b.readable())
-        self.assertFalse(b.writable())
-        self.assertFalse(b.seekable())
-        self.assertTrue(b.length is None)
-        # but note that we can still peek on the data
-        # that we have buffered
-        self.assertTrue(b.peek(3) == data[0:3])
-
-    def test_unblocked(self):
-        data = "How long is a piece of string?"
-        src = server.Pipe(rblocking=False, name="test_unblocked")
-        # write one byte at a time
-        for c in data:
-            src.write(c)
-        src.write_eof()
-        # default buffer size outgrows pipe
-        b = BufferedEntityWrapper(src)
-        self.assertTrue(b.readable())
-        self.assertFalse(b.writable())
-        self.assertTrue(b.seekable())
-        self.assertTrue(b.length == len(data))
-        # the buffer also smooths access to the data
-        self.assertTrue(b.read(10) == data[0:10])
-
-    def test_peek(self):
-        data = "How long is a piece of string?"
-        src = StringIO(data)
-        # make buffer smaller than src
-        b = BufferedEntityWrapper(src, 10)
-        self.assertTrue(b.peek(3) == data[0:3])
-        self.assertTrue(b.read(8) == data[0:8], "Data consumed by peek")
-        self.assertTrue(b.peek(3) == data[8:10], "Peek to end of buffer")
-        nbytes = 0
-        while nbytes < 3:
-            rdata = b.read(3 - nbytes)
-            self.assertTrue(rdata, "reading past buffer")
-            nbytes += len(rdata)
-        # now peek should always return empty
-        self.assertTrue(b.peek(1) == "", "Can't peek past end of buffer")
 
 
 class ChunkedTests(unittest.TestCase):
@@ -172,12 +34,26 @@ class ChunkedTests(unittest.TestCase):
         os.chdir(self.cwd)
 
     def test_chunked_reader(self):
-        src = StringIO("10\r\n0123456789ABCDEF\r\n"
-                       "5; ext=true\r\n01234\r\n"
-                       "0\r\nhead: false trailer\r\n\r\ntrailer")
+        src = io.BytesIO(b"10\r\n0123456789ABCDEF\r\n"
+                         b"5; ext=true\r\n01234\r\n"
+                         b"0\r\nhead: false trailer\r\n\r\ntrailer")
         r = ChunkedReader(src)
-        self.assertTrue(r.read() == "0123456789ABCDEF01234", "unchunked data")
-        self.assertTrue(src.read() == "trailer", "trailer left on the stream")
+        self.assertTrue(r.read() == b"0123456789ABCDEF01234", "unchunked data")
+        self.assertTrue(src.read() == b"trailer", "trailer left on the stream")
+
+
+class WSGITests(unittest.TestCase):
+
+    FOX = b'The quick brown fox jumped over the lazy dog'
+
+    def test_simple(self):
+        input = io.BytesIO()
+        # write some data to the input
+        input.write(self.FOX)
+        input.seek(0)
+        environ = {'wsgi.input': input, 'CONTENT_LENGTH': str(len(self.FOX))}
+        r = WSGIInputWrapper(environ)
+        self.assertTrue(r.read() == self.FOX, "input data")
 
 
 class MessageTests(unittest.TestCase):
@@ -187,9 +63,9 @@ class MessageTests(unittest.TestCase):
         # test ability to hold a simple request
         request.start_receiving()
         self.assertTrue(request.recv_mode() == request.RECV_LINE)
-        request.recv("GET /pub/WWW/TheProject.html HTTP/1.1\r\n")
+        request.recv(b"GET /pub/WWW/TheProject.html HTTP/1.1\r\n")
         self.assertTrue(request.recv_mode() == request.RECV_HEADERS)
-        request.recv(["Host: www.w3.org\r\n", "\r\n"])
+        request.recv([b"Host: www.w3.org\r\n", b"\r\n"])
         self.assertTrue(request.recv_mode() is None)
 
     def test_nochunked(self):
@@ -203,7 +79,7 @@ class MessageTests(unittest.TestCase):
         This is also tested at the client level but here we check that
         we get an error if we are generating a message for an HTTP/1.0
         recipient."""
-        request = Request(entity_body=StringIO("How long?"))
+        request = Request(entity_body=io.BytesIO(b"How long?"))
         request.set_method("PUT")
         request.set_request_uri("/resource")
         request.set_host("www.example.com")
@@ -212,7 +88,7 @@ class MessageTests(unittest.TestCase):
         self.assertTrue(request.get_content_length() is not None)
         self.assertTrue(request.get_transfer_encoding() is None)
         # now check that we default to chunked instead of buffering
-        request = Request(entity_body=StringIO("How long?"))
+        request = Request(entity_body=io.BytesIO(b"How long?"))
         request.set_method("PUT")
         request.set_request_uri("/resource")
         request.set_host("www.example.com")
@@ -229,14 +105,14 @@ class MessageTests(unittest.TestCase):
             message is terminated by closing the connection"""
         request = Request()
         request.start_receiving()
-        request.recv("POST /script.cgi HTTP/1.1\r\n")
-        request.recv(["Transfer-Encoding: gzip, chunked\r\n", "\r\n"])
+        request.recv(b"POST /script.cgi HTTP/1.1\r\n")
+        request.recv([b"Transfer-Encoding: gzip, chunked\r\n", b"\r\n"])
         # message must now be in line mode for chunk header
         self.assertTrue(request.recv_mode() == request.RECV_LINE)
         response = Response(request)
         response.start_receiving()
-        response.recv("HTTP/1.1 200 OK\r\n")
-        response.recv(["Transfer-Encoding: gzip\r\n", "\r\n"])
+        response.recv(b"HTTP/1.1 200 OK\r\n")
+        response.recv([b"Transfer-Encoding: gzip\r\n", b"\r\n"])
         # message must now be in 'read until close' mode
         self.assertTrue(response.recv_mode() == request.RECV_ALL)
 
@@ -251,24 +127,24 @@ class MessageTests(unittest.TestCase):
             the "chunked" transfer-coding"""
         request = Request()
         request.start_receiving()
-        request.recv("POST /script.cgi HTTP/1.1\r\n")
-        request.recv(["Transfer-Encoding: chunked\r\n", "\r\n"])
-        chunk1 = "The quick brown "
-        chunk2 = "fox jumped over the lazy dog."
-        request.recv('%X ; a=xyz; b="\\"odd\\\rparam\\\n"\r\n' % len(chunk1))
+        request.recv(b"POST /script.cgi HTTP/1.1\r\n")
+        request.recv([b"Transfer-Encoding: chunked\r\n", b"\r\n"])
+        chunk1 = b"The quick brown "
+        chunk2 = b"fox jumped over the lazy dog."
+        request.recv(b'%X ; a=xyz; b="\\"odd\\\rparam\\\n"\r\n' % len(chunk1))
         request.recv(chunk1)
-        request.recv('\r\n')
-        request.recv('%X\r\n' % len(chunk2))
+        request.recv(b'\r\n')
+        request.recv(b'%X\r\n' % len(chunk2))
         request.recv(chunk2)
-        request.recv('\r\n')
-        request.recv('0; the=end \r\n')
-        request.recv(['\r\n'])
+        request.recv(b'\r\n')
+        request.recv(b'0; the=end \r\n')
+        request.recv([b'\r\n'])
         self.assertTrue(request.entity_body.getvalue() == chunk1 + chunk2)
 
     def test_gzip(self):
-        srcbody = StringIO("The quick brown fox jumped over the lazy dog")
-        zchunked = StringIO()
-        dstbody = StringIO()
+        srcbody = io.BytesIO(b"The quick brown fox jumped over the lazy dog")
+        zchunked = io.BytesIO()
+        dstbody = io.BytesIO()
         src_request = Request(entity_body=srcbody)
         dst_request = Request(entity_body=dstbody)
         src_request.set_method("post")
@@ -280,7 +156,7 @@ class MessageTests(unittest.TestCase):
         # send_* and recv should match, take a short cut
         dst_request.recv(src_request.send_start())
         headers = src_request.send_header()
-        headers = map(lambda x: x + grammar.CRLF, headers.split('\r\n')[:-1])
+        headers = [h + grammar.CRLF for h in headers.split(b'\r\n')[:-1]]
         dst_request.recv(headers)
         while True:
             data = src_request.send_body()
@@ -307,27 +183,27 @@ class MessageTests(unittest.TestCase):
             All multipart types share a common syntax, as defined in
             section 5.1.1 of RFC 2046 and MUST include a boundary
             parameter as part of the media type value"""
-        response_start = "HTTP/1.1 206 Partial Content\r\n"
+        response_start = b"HTTP/1.1 206 Partial Content\r\n"
         response_headers = [
-            "Date: Wed, 15 Nov 1995 06:25:24 GMT\r\n",
-            "Last-Modified: Wed, 15 Nov 1995 04:58:08 GMT\r\n",
-            "Content-type: multipart/byteranges; "
-            "boundary=THIS_STRING_SEPARATES\r\n",
-            "\r\n"]
+            b"Date: Wed, 15 Nov 1995 06:25:24 GMT\r\n",
+            b"Last-Modified: Wed, 15 Nov 1995 04:58:08 GMT\r\n",
+            b"Content-type: multipart/byteranges; "
+            b"boundary=THIS_STRING_SEPARATES\r\n",
+            b"\r\n"]
         response_body = [
-            "--THIS_STRING_SEPARATES\r\n",
-            "Content-type: application/pdf\r\n",
-            "Content-range: bytes 500-999/8000\r\n",
-            "\r\n",
-            "...the first range...\r\n",
-            "--THIS_STRING_SEPARATES\r\n",
-            "Content-type: application/pdf\r\n",
-            "Content-range: bytes 7000-7999/8000\r\n",
-            "\r\n",
-            "...the second range\r\n",
-            "--THIS_STRING_",
-            "SEPARATES-- junk \r\n"]
-        dstbody = StringIO()
+            b"--THIS_STRING_SEPARATES\r\n",
+            b"Content-type: application/pdf\r\n",
+            b"Content-range: bytes 500-999/8000\r\n",
+            b"\r\n",
+            b"...the first range...\r\n",
+            b"--THIS_STRING_SEPARATES\r\n",
+            b"Content-type: application/pdf\r\n",
+            b"Content-range: bytes 7000-7999/8000\r\n",
+            b"\r\n",
+            b"...the second range\r\n",
+            b"--THIS_STRING_",
+            b"SEPARATES-- junk \r\n"]
+        dstbody = io.BytesIO()
         request = Request()
         dst_response = Response(request, entity_body=dstbody)
         dst_response.start_receiving()
@@ -342,14 +218,13 @@ class MessageTests(unittest.TestCase):
         # is detected the message should stop receiving
         self.assertTrue(dst_response.recv_mode() is None)
         # transport padding and the closing CRLF are considered spurious
-        self.assertTrue(dstbody.getvalue() ==
-                        string.join(response_body, '')[:-8])
+        self.assertTrue(dstbody.getvalue() == b''.join(response_body)[:-8])
         response_headers = [
-            "Date: Wed, 15 Nov 1995 06:25:24 GMT\r\n",
-            "Last-Modified: Wed, 15 Nov 1995 04:58:08 GMT\r\n",
-            "Content-type: multipart/mixed\r\n",
-            "\r\n"]
-        dstbody = StringIO()
+            b"Date: Wed, 15 Nov 1995 06:25:24 GMT\r\n",
+            b"Last-Modified: Wed, 15 Nov 1995 04:58:08 GMT\r\n",
+            b"Content-type: multipart/mixed\r\n",
+            b"\r\n"]
+        dstbody = io.BytesIO()
         request = Request()
         dst_response = Response(request, entity_body=dstbody)
         dst_response.start_receiving()
@@ -370,16 +245,16 @@ class MessageTests(unittest.TestCase):
         request = Request()
         request.set_header("X-Test", "hello")
         request.set_header("X-Test", "good-bye")
-        self.assertTrue(request.get_header("X-Test") == "good-bye")
+        self.assertTrue(request.get_header("X-Test") == b"good-bye")
         request.set_header("X-Test", "hello again", True)
         self.assertTrue(request.get_header("X-Test") ==
-                        "good-bye, hello again")
+                        b"good-bye, hello again")
         response = Response(request)
         response.start_receiving()
-        response.recv("HTTP/1.1 200 OK\r\n")
-        response.recv(["X-Test: hello\r\n", "x-test: good-bye\r\n", "\r\n"])
+        response.recv(b"HTTP/1.1 200 OK\r\n")
+        response.recv([b"X-Test: hello\r\n", b"x-test: good-bye\r\n", b"\r\n"])
         self.assertTrue(response.get_header("X-test").strip() ==
-                        "hello, good-bye")
+                        b"hello, good-bye")
 
     def test_message_body_req(self):
         """RFC2616:
@@ -390,7 +265,7 @@ class MessageTests(unittest.TestCase):
 
             A server SHOULD read and forward a message-body on any
             request"""
-        request = Request(entity_body="Bad data")
+        request = Request(entity_body=b"Bad data")
         request.set_method("GET")
         request.set_request_uri("/")
         try:
@@ -398,14 +273,14 @@ class MessageTests(unittest.TestCase):
             self.fail("GET request with body")
         except HTTPException:
             pass
-        body = StringIO()
-        bad_data = "Bad data"
+        body = io.BytesIO()
+        bad_data = b"Bad data"
         request = Request(entity_body=body)
         request.start_receiving()
-        request.recv("GET / HTTP/1.1\r\n")
-        request.recv(["Content-Length: %i\r\n" % len(bad_data),
-                      "Content-type: text/plain\r\n",
-                      "\r\n"])
+        request.recv(b"GET / HTTP/1.1\r\n")
+        request.recv([b"Content-Length: %i\r\n" % len(bad_data),
+                      b"Content-type: text/plain\r\n",
+                      b"\r\n"])
         self.assertTrue(request.recv_mode() > 0)
         request.recv(bad_data)
         self.assertTrue(request.recv_mode() is None)
@@ -420,7 +295,7 @@ class MessageTests(unittest.TestCase):
         request = Request()
         request.set_method("HEAD")
         request.set_request_uri("/")
-        body = "Bad data"
+        body = b"Bad data"
         response = Response(request, entity_body=body)
         response.set_status(200)
         response.set_content_length(len(body))
@@ -432,11 +307,11 @@ class MessageTests(unittest.TestCase):
             pass
         response = Response(request)
         response.start_receiving()
-        response.recv("HTTP/1.1 200 OK")
+        response.recv(b"HTTP/1.1 200 OK")
         response.recv(
-            ["Content-type: text/plain\r\n",
-             "Content-Length: %i\r\n" % len(body),
-             "\r\n"])
+            [b"Content-type: text/plain\r\n",
+             b"Content-Length: %i\r\n" % len(body),
+             b"\r\n"])
         self.assertTrue(response.recv_mode() is None)
 
     def test_message_body_res(self):
@@ -447,7 +322,7 @@ class MessageTests(unittest.TestCase):
         request = Request()
         request.set_method("PUT")
         request.set_request_uri("/resource")
-        body = "Bad data"
+        body = b"Bad data"
         for i in (100, 101, 204, 304):
             response = Response(request, entity_body=body)
             response.set_status(i)
@@ -460,11 +335,11 @@ class MessageTests(unittest.TestCase):
                 pass
             response = Response(request)
             response.start_receiving()
-            response.recv("HTTP/1.1 %i For Testing" % i)
+            response.recv(b"HTTP/1.1 %i For Testing" % i)
             response.recv(
-                ["Content-type: text/plain\r\n",
-                 "Content-Length: %i\r\n" % len(body),
-                 "\r\n"])
+                [b"Content-type: text/plain\r\n",
+                 b"Content-Length: %i\r\n" % len(body),
+                 b"\r\n"])
             self.assertTrue(response.recv_mode() is None)
 
     def test_message_length1(self):
@@ -486,7 +361,7 @@ class MessageTests(unittest.TestCase):
         The second rule here appears a little more specific which
         suggests that we should be generous when receiving a
         Transfer-Encoding of identity."""
-        body = "Bad data"
+        body = b"Bad data"
         request = Request(entity_body=body)
         request.set_method("PUT")
         request.set_request_uri("/resource")
@@ -500,29 +375,29 @@ class MessageTests(unittest.TestCase):
             pass
         request = Request()
         request.start_receiving()
-        request.recv("PUT /resource HTTP/1.1\r\n")
+        request.recv(b"PUT /resource HTTP/1.1\r\n")
         request.recv([
-            "Content-Length: %i\r\n" % (len(body) - 3),  # misleading length
-            "Content-Type: text/plain\r\n",
-            "Transfer-Encoding: chunked\r\n",
-            "\r\n"])
+            b"Content-Length: %i\r\n" % (len(body) - 3),  # misleading length
+            b"Content-Type: text/plain\r\n",
+            b"Transfer-Encoding: chunked\r\n",
+            b"\r\n"])
         # so we should be back in line mode ready for
         # the chunk header
         self.assertTrue(request.recv_mode() == request.RECV_LINE)
-        request.recv("%X\r\n" % len(body))
+        request.recv(b"%X\r\n" % len(body))
         request.recv(body)
         request.recv(grammar.CRLF)
-        request.recv("0\r\n")
+        request.recv(b"0\r\n")
         request.recv([grammar.CRLF])
         self.assertTrue(request.entity_body.getvalue() == body)
         request = Request()
         request.start_receiving()
-        request.recv("PUT /resource HTTP/1.1\r\n")
+        request.recv(b"PUT /resource HTTP/1.1\r\n")
         request.recv([
-            "Content-Length: %i\r\n" % len(body),
-            "Content-Type: text/plain\r\n",
-            "Transfer-Encoding: identity\r\n",
-            "\r\n"])
+            b"Content-Length: %i\r\n" % len(body),
+            b"Content-Type: text/plain\r\n",
+            b"Transfer-Encoding: identity\r\n",
+            b"\r\n"])
         # we should abide by Content-Length, ignoring identity encoding
         self.assertTrue(request.recv_mode() == len(body))
         request.recv(body)
@@ -541,7 +416,7 @@ class MessageTests(unittest.TestCase):
         request.set_method("GET")
         request.set_request_uri("/resource")
         request.set_header("Range", "bytes=500-999,7000-7999")
-        body = """--THIS_STRING_SEPARATES
+        body = b"""--THIS_STRING_SEPARATES
 Content-type: application/pdf
 Content-range: bytes 500-999/8000
 
@@ -552,7 +427,7 @@ Content-range: bytes 7000-7999/8000
 
 ...the second range
 --THIS_STRING_SEPARATES--"""
-        response = Response(request, entity_body=StringIO(body))
+        response = Response(request, entity_body=io.BytesIO(body))
         response.set_status(206)
         response.set_date("Wed, 15 Nov 1995 06:25:24 GMT")
         response.set_content_type(
@@ -568,6 +443,535 @@ Content-range: bytes 7000-7999/8000
         response.start_sending()
         self.assertTrue(response.get_transfer_encoding() is None)
         self.assertTrue("close" in response.get_connection())
+
+    def test_aborted_send(self):
+        body = b"Bad data"
+        request = Request(entity_body=body)
+        request.set_protocol(params.HTTP_1p1)
+        request.set_method("PUT")
+        request.set_request_uri("/resource")
+        request.set_content_type("text/plain")
+        request.set_transfer_encoding("chunked")
+        request.start_sending()
+        request.send_start()
+        request.send_header()
+        # now abort the send, should send a zero length chunk
+        self.assertTrue(request.abort_sending() == 0)
+        self.assertTrue(request.send_body() == b"0\r\n\r\n")
+        request = Request(entity_body=body)
+        request.set_protocol(params.HTTP_1p1)
+        request.set_method("PUT")
+        request.set_request_uri("/resource")
+        request.set_content_type("text/plain")
+        request.set_content_length(len(body))
+        request.start_sending()
+        request.send_start()
+        request.send_header()
+        # now abort the send, should indicate remaining length
+        self.assertTrue(request.abort_sending() == len(body))
+        self.assertTrue(request.send_body() == body)
+
+
+class MockBlockingByteReader(RawIOBase):
+
+    def __init__(self, src, block_after=set()):
+        RawIOBase.__init__(self)
+        self.src = src
+        self.block_after = block_after
+        self.buffer = bytearray(io.DEFAULT_BUFFER_SIZE)
+        self.bpos = 0
+        self.blen = 0
+        self.src_eof = False
+
+    def close(self):
+        super(MockBlockingByteReader, self).close()
+        self.src.close()
+
+    def readable(self):
+        return True
+
+    def readinto(self, b):
+        if self.closed:
+            raise IOError(errno.EBADF, os.strerror(errno.EBADF),
+                          "stream is closed")
+        nbytes = len(b)
+        if self.blen > self.bpos:
+            # buffered data to read
+            if random.random() < 0.5:
+                # blocked half of the time
+                return None
+            # copy data from our buffer to b
+            i = 0
+            while i < nbytes and self.bpos < self.blen:
+                if i and random.random() < 0.9:
+                    # arbitrary break in data
+                    # don't return 0 as that means EOF
+                    break
+                b[i] = self.buffer[self.bpos]
+                self.bpos += 1
+                if b[i] in self.block_after:
+                    # we'll break here
+                    return i + 1
+                i += 1
+            return i
+        if self.src_eof:
+            return 0
+        # our buffer is empty, fill it
+        self.bpos = self.blen = 0
+        nread = self.src.readinto(self.buffer)
+        if nread is None:
+            # the src is actually blocked too!
+            return None
+        elif nread == 0:
+            # end of file
+            self.src_eof = True
+            return 0
+        else:
+            # we have read some data, return None to force a
+            # second call
+            self.blen = nread
+            return None
+
+    def writable(self):
+        return False
+
+    def write(self, b):
+        raise IOError(errno.EPERM, os.strerror(errno.EPERM),
+                      "stream not writable")
+
+
+class RecvWrapperTests(unittest.TestCase):
+
+    GET_EXAMPLE = (
+        b"GET / HTTP/1.1",
+        b"Host: www.pyslet.org",
+        b"User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10.11; rv:45.0) "
+        b"Gecko/20100101 Firefox/45.0",
+        b"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,"
+        b"*/*;q=0.8",
+        b"Accept-Language: en-US,en;q=0.5",
+        b"Accept-Encoding: gzip, deflate",
+        b"DNT: 1",
+        b"Connection: keep-alive",
+        b"",
+        b"")
+
+    RESPONSE_EXAMPLE = (
+        b"HTTP/1.1 301 Moved Permanently",
+        b"Date: Thu, 21 Apr 2016 08:48:53 GMT",
+        b"Server: Apache/2.2.31 (Amazon)",
+        b"Location: https://www.pyslet.org/",
+        b"Content-Length: 311",
+        b"Connection: close",
+        b"Content-Type: text/html; charset=iso-8859-1",
+        b"",
+        b"<!DOCTYPE HTML PUBLIC \"-//IETF//DTD HTML 2.0//EN\">\n"
+        b"<html><head>\n"
+        b"<title>301 Moved Permanently</title>\n"
+        b"</head><body>\n"
+        b"<h1>Moved Permanently</h1>\n"
+        b"<p>The document has moved <a "
+        b"href=\"https://www.pyslet.org/\">here</a>.</p>\n"
+        b"<hr>\n"
+        b"<address>Apache/2.2.31 (Amazon) Server at www.pyslet.org Port "
+        b"80</address>\n"
+        b"</body></html>\n")
+
+    def test_constructor(self):
+        src = io.BytesIO(grammar.CRLF.join(self.GET_EXAMPLE))
+        # pass in a srouce stream and a class to receive
+        rstream = RecvWrapper(src, Request)
+        self.assertTrue(isinstance(rstream.message, Request))
+        try:
+            rstream.fileno()
+            self.fail("RecvWrapper.fileno")
+        except IOError:
+            pass
+        # flush does nothing but is callable
+        rstream.flush()
+        self.assertFalse(rstream.isatty())
+        self.assertTrue(rstream.readable())
+        rstream.close()
+
+    def test_close(self):
+        src = io.BytesIO(grammar.CRLF.join(self.GET_EXAMPLE))
+        rstream = RecvWrapper(src, Request)
+        self.assertFalse(rstream.closed)
+        rstream.close()
+        self.assertTrue(rstream.closed)
+        try:
+            rstream.read(1)
+            self.fail("RecvWrapper.read after close")
+        except IOError:
+            pass
+
+    def test_readline(self):
+        src = io.BytesIO(grammar.CRLF.join(self.GET_EXAMPLE))
+        rstream = RecvWrapper(src, Request)
+        # blocking empty stream
+        self.assertTrue(rstream.readline() == b"")
+        rstream.close()
+        src = io.BytesIO(grammar.CRLF.join(self.RESPONSE_EXAMPLE))
+        rstream = RecvWrapper(src, Response)
+        # blocking non-empty stream
+        self.assertTrue(
+            rstream.readline() ==
+            b'<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">\n')
+        # blocking non-empty stream with limit bytes
+        self.assertTrue(rstream.readline(6) == b'<html>')
+        rstream.close()
+
+    def test_readlines(self):
+        src = io.BytesIO(grammar.CRLF.join(self.GET_EXAMPLE))
+        rstream = RecvWrapper(src, Request)
+        # blocking empty stream
+        lines = rstream.readlines()
+        # returns a list of lines
+        self.assertTrue(isinstance(lines, list))
+        # should be empty
+        self.assertTrue(len(lines) == 0)
+        rstream.close()
+        src = io.BytesIO(grammar.CRLF.join(self.RESPONSE_EXAMPLE))
+        rstream = RecvWrapper(src, Response)
+        # read 10 bytes (ish)
+        lines = rstream.readlines(10)
+        self.assertTrue(len(lines) == 1)
+        self.assertTrue(
+            lines[0] ==
+            b'<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">\n')
+        # read the rest, no trailing empty line!
+        lines = rstream.readlines()
+        self.assertTrue(len(lines) == 8)
+        self.assertTrue(lines[7] == b"</body></html>\n")
+        rstream.close()
+
+    def test_read(self):
+        src = io.BytesIO(grammar.CRLF.join(self.GET_EXAMPLE))
+        rstream = RecvWrapper(src, Request)
+        # blocking empty stream
+        self.assertTrue(rstream.read(1) == b"")
+        rstream.close()
+        src = io.BytesIO(grammar.CRLF.join(self.RESPONSE_EXAMPLE))
+        rstream = RecvWrapper(src, Response)
+        # blocking non-empty stream
+        c = rstream.read(1)
+        self.assertTrue(c == b"<")
+        line = []
+        while c != b"\n":
+            line.append(c)
+            c = rstream.read(1)
+            # won't return None
+            self.assertTrue(len(c) == 1)
+        self.assertTrue(b"".join(line) ==
+                        b'<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">')
+        data = rstream.read()
+        self.assertTrue(data.endswith(b"</html>\n"))
+        self.assertTrue(rstream.read(1) == b"")
+        rstream.close()
+
+    def test_read_nonblocking(self):
+        src = io.BytesIO(grammar.CRLF.join(self.GET_EXAMPLE))
+        # simulate breaks in the data after LF
+        src = MockBlockingByteReader(src, block_after=((10,)))
+        rstream = RecvWrapper(src, Request)
+        # non-blocking empty stream
+        while True:
+            c = rstream.read(1)
+            if c == b"":
+                break
+            self.assertTrue(c is None,
+                            "empty stream non-blocking: %s" % repr(c))
+        rstream.close()
+        src = io.BytesIO(grammar.CRLF.join(self.RESPONSE_EXAMPLE))
+        src = MockBlockingByteReader(src, block_after=((10,)))
+        rstream = RecvWrapper(src, Response)
+        # non-blocking non-empty stream
+        line = []
+        blocks = 0
+        while True:
+            c = rstream.read(1)
+            if c:
+                if c == b"\n":
+                    break
+                else:
+                    line.append(c)
+                    continue
+            self.assertTrue(c is None,
+                            "empty stream non-blocking: %s" % repr(c))
+            blocks += 1
+        # our mock blocking stream always returns None at least once
+        self.assertTrue(blocks > 1, "non-blocking stream failed to stall")
+        self.assertTrue(b"".join(line) ==
+                        b'<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">')
+        # readall behaviour is undefined, don't test it
+        rstream.close()
+
+    def test_seek(self):
+        src = io.BytesIO(grammar.CRLF.join(self.GET_EXAMPLE))
+        rstream = RecvWrapper(src, Request)
+        self.assertFalse(rstream.seekable())
+        try:
+            rstream.seek(0)
+            self.fail("RecvWrapper.seek")
+        except IOError:
+            pass
+        try:
+            rstream.tell()
+            self.fail("RecvWrapper.tell")
+        except IOError:
+            pass
+        try:
+            rstream.truncate(0)
+            self.fail("RecvWrapper.truncate")
+        except IOError:
+            pass
+        rstream.close()
+
+    def test_write(self):
+        src = io.BytesIO(grammar.CRLF.join(self.GET_EXAMPLE))
+        rstream = RecvWrapper(src, Request)
+        self.assertFalse(rstream.writable())
+        try:
+            rstream.write(b"Hello")
+            self.fail("RecvWrapper.write")
+        except IOError:
+            pass
+        rstream.close()
+
+    def test_message_header(self):
+        src = io.BytesIO(grammar.CRLF.join(self.GET_EXAMPLE))
+        rstream = RecvWrapper(src, Request)
+        # initially the message object exists but has no headers
+        self.assertTrue(rstream.message.get_host() is None)
+        message = rstream.read_message_header()
+        # just returns the message
+        self.assertTrue(rstream.message is message)
+        # but now with headers!
+        self.assertTrue(message.get_host() == b"www.pyslet.org")
+        # check the last header
+        self.assertTrue("keep-alive" in message.get_connection())
+        # subsequent calls just return the message again
+        message = rstream.read_message_header()
+        self.assertTrue(rstream.message is message)
+        # the content of the stream is unaltered
+        self.assertTrue(rstream.read(1) == b"")
+        rstream.close()
+        # non-blocking test with response
+        src = io.BytesIO(grammar.CRLF.join(self.RESPONSE_EXAMPLE))
+        src = MockBlockingByteReader(src, block_after=((10,)))
+        rstream = RecvWrapper(src, Response)
+        blocks = 0
+        while True:
+            message = rstream.read_message_header()
+            if message is None:
+                blocks += 1
+                continue
+            self.assertTrue(message is rstream.message)
+            break
+        self.assertTrue(blocks > 1, "non-blocking stream failed to stall")
+        mt = message.get_content_type()
+        self.assertTrue(mt.type == "text")
+        self.assertTrue(mt['charset'] == b"iso-8859-1")
+        line = []
+        while True:
+            c = rstream.read(1)
+            if c:
+                if c == b"\n":
+                    break
+                else:
+                    line.append(c)
+                    continue
+            self.assertTrue(c is None,
+                            "empty stream non-blocking: %s" % repr(c))
+        self.assertTrue(b"".join(line) ==
+                        b'<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">')
+        rstream.close()
+
+
+class SendWrapperTests(unittest.TestCase):
+
+    def test_constructor(self):
+        request = Request(entity_body=io.BytesIO(b"How long?"))
+        request.set_method("POST")
+        request.set_request_uri("/script.cgi")
+        request.set_content_type("text/plain")
+        rstream = SendWrapper(request)
+        self.assertTrue(rstream.message is request)
+        try:
+            rstream.fileno()
+            self.fail("SendWrapper.fileno")
+        except IOError:
+            pass
+        # flush does nothing but is callable
+        rstream.flush()
+        self.assertFalse(rstream.isatty())
+        self.assertTrue(rstream.readable())
+        rstream.close()
+
+    def test_close(self):
+        request = Request()
+        request.set_method("GET")
+        request.set_request_uri("/script.cgi")
+        request.set_content_type("text/plain")
+        rstream = SendWrapper(request)
+        self.assertFalse(rstream.closed)
+        rstream.close()
+        self.assertTrue(rstream.closed)
+        try:
+            rstream.read(1)
+            self.fail("SendWrapper.read after close")
+        except IOError:
+            pass
+
+    def test_readline(self):
+        request = Request()
+        request.set_method("GET")
+        request.set_request_uri("/index.html")
+        rstream = SendWrapper(request)
+        # blocking empty message body
+        self.assertTrue(rstream.readline() == b"GET /index.html HTTP/1.1\r\n")
+        self.assertTrue(rstream.readline() == b"\r\n")
+        self.assertTrue(rstream.readline() == b"")
+        rstream.close()
+        request = Request(entity_body=io.BytesIO(b"How long?"))
+        request.set_method("POST")
+        request.set_request_uri("/script.cgi")
+        rstream = SendWrapper(request, params.HTTP_1p0)
+        # blocking non-empty message body
+        self.assertTrue(rstream.readline() == b"POST /script.cgi HTTP/1.1\r\n")
+        self.assertTrue(rstream.readline() == b"Connection: close\r\n")
+        self.assertTrue(rstream.readline() == b"Content-Length: 9\r\n")
+        self.assertTrue(rstream.readline() == b"\r\n")
+        # blocking non-empty stream with limit bytes
+        self.assertTrue(rstream.readline(6) == b"How lo")
+        rstream.close()
+
+    def test_readlines(self):
+        request = Request()
+        request.set_method("GET")
+        request.set_request_uri("/index.html")
+        rstream = SendWrapper(request)
+        # blocking empty message body
+        lines = rstream.readlines()
+        # returns a list of lines
+        self.assertTrue(isinstance(lines, list))
+        # should be empty
+        self.assertTrue(len(lines) == 2)
+        rstream.close()
+        request = Request(entity_body=io.BytesIO(b"How long?"))
+        request.set_method("POST")
+        request.set_request_uri("/script.cgi")
+        rstream = SendWrapper(request, params.HTTP_1p0)
+        # blocking non-empty message body
+        # read 10 bytes (ish)
+        lines = rstream.readlines(10)
+        self.assertTrue(len(lines) == 1)
+        self.assertTrue(
+            lines[0] ==
+            b'POST /script.cgi HTTP/1.1\r\n')
+        # read the rest, no trailing empty line!
+        lines = rstream.readlines()
+        self.assertTrue(len(lines) == 4)
+        self.assertTrue(lines[3] == b"How long?")
+        rstream.close()
+
+    def test_read(self):
+        request = Request()
+        request.set_method("GET")
+        request.set_request_uri("/index.html")
+        rstream = SendWrapper(request)
+        # blocking empty message body
+        self.assertTrue(rstream.readline() == b"GET /index.html HTTP/1.1\r\n")
+        self.assertTrue(rstream.readline() == b"\r\n")
+        self.assertTrue(rstream.read(1) == b"")
+        rstream.close()
+        request = Request(entity_body=io.BytesIO(b"How long?"))
+        request.set_method("POST")
+        request.set_request_uri("/script.cgi")
+        rstream = SendWrapper(request, params.HTTP_1p0)
+        # blocking non-empty message body
+        c = rstream.read(1)
+        self.assertTrue(c == b"P")
+        line = []
+        while c != b"\n":
+            line.append(c)
+            c = rstream.read(1)
+            # won't return None
+            self.assertTrue(len(c) == 1)
+        self.assertTrue(b"".join(line) ==
+                        b'POST /script.cgi HTTP/1.1\r')
+        data = rstream.read()
+        self.assertTrue(data.endswith(b"How long?"))
+        self.assertTrue(rstream.read(1) == b"")
+        rstream.close()
+
+    def test_read_nonblocking(self):
+        src = io.BytesIO(b"How long?\n" * 10)
+        src = MockBlockingByteReader(src, block_after=((10,)))
+        response = Response(entity_body=src)
+        response.set_status(200)
+        rstream = SendWrapper(response, params.HTTP_1p0)
+        # non-blocking non-empty message body
+        lines = []
+        line = []
+        blocks = 0
+        while True:
+            c = rstream.read(1)
+            if c:
+                if c == b"\n":
+                    # end of line
+                    lines.append(b"".join(line))
+                    line = []
+                else:
+                    line.append(c)
+            elif c is None:
+                blocks += 1
+            else:
+                break
+        # our mock blocking stream always returns None at least once
+        self.assertTrue(blocks > 1, "non-blocking stream failed to stall")
+        boundary = lines.index(b"\r")
+        self.assertTrue(boundary > 0)
+        for line in lines[boundary + 1:]:
+            self.assertTrue(line == b"How long?")
+        # readall behaviour is undefined, don't test it
+        rstream.close()
+
+    def test_seek(self):
+        request = Request(entity_body=io.BytesIO(b"How long?"))
+        request.set_method("POST")
+        request.set_request_uri("/script.cgi")
+        rstream = SendWrapper(request, params.HTTP_1p0)
+        self.assertFalse(rstream.seekable())
+        try:
+            rstream.seek(0)
+            self.fail("RecvWrapper.seek")
+        except IOError:
+            pass
+        try:
+            rstream.tell()
+            self.fail("RecvWrapper.tell")
+        except IOError:
+            pass
+        try:
+            rstream.truncate(0)
+            self.fail("RecvWrapper.truncate")
+        except IOError:
+            pass
+        rstream.close()
+
+    def test_write(self):
+        request = Request(entity_body=io.BytesIO(b"How long?"))
+        request.set_method("POST")
+        request.set_request_uri("/script.cgi")
+        rstream = SendWrapper(request, params.HTTP_1p0)
+        self.assertFalse(rstream.writable())
+        try:
+            rstream.write(b"Hello")
+            self.fail("RecvWrapper.write")
+        except IOError:
+            pass
+        rstream.close()
 
 
 class HeaderTests(unittest.TestCase):
@@ -823,11 +1227,8 @@ class HeaderTests(unittest.TestCase):
             " da, en-gb;q=0.8, en;q=0.7 ")
         self.assertTrue(
             rq_tokens.select_token(["en-US"]) == "en-US", "match prefix")
-        self.assertTrue(
-            type(
-                rq_tokens.select_token(
-                    ["en-US"])) in types.StringTypes,
-            "select_token return type")
+        self.assertTrue(is_string(rq_tokens.select_token(["en-US"])),
+                        "select_token return type")
         match = rq_tokens.select_language(
             [params.LanguageTag.from_str("en-US")])
         self.assertTrue(match == "en-US", "match prefix (tag version)")
@@ -879,8 +1280,8 @@ class HeaderTests(unittest.TestCase):
         self.assertTrue(str(ar) == "none", "Explicit none, str")
         ar = AcceptRanges("bytes", "bits")
         self.assertTrue(len(ar) == 2, "bytes and bits")
-        self.assertTrue(ar[0] == "bytes", "bytes at index 0")
-        self.assertTrue(ar[1] == "bits", "bits at index 1")
+        self.assertTrue(ar[0] == b"bytes", "bytes at index 0")
+        self.assertTrue(ar[1] == b"bits", "bits at index 1")
         self.assertTrue(str(ar) == "bytes, bits", "bytes and bits, str")
         try:
             ar[2]
@@ -913,7 +1314,7 @@ class HeaderTests(unittest.TestCase):
         self.assertTrue(len(allow) == 3, "3 methods")
         self.assertTrue(
             str(allow) == "GET, HEAD, PUT", "Force upper-case on str")
-        self.assertTrue(allow[1] == "HEAD", "HEAD at index 1")
+        self.assertTrue(allow[1] == b"HEAD", "HEAD at index 1")
         self.assertTrue(
             allow.is_allowed("head"), "method test case insensitive")
         try:
@@ -952,9 +1353,9 @@ class HeaderTests(unittest.TestCase):
             "private" in cc, "Tuple with tuple in constructor check")
         self.assertTrue(
             str(cc) == "no-store, private=\"x, y, z\"", "Quoted string")
-        self.assertTrue(cc[0] == "no-store", "integer index")
+        self.assertTrue(cc[0] == b"no-store", "integer index")
         self.assertTrue(
-            cc[1] == ("private", ("x", "y", "z")), "integer index 1")
+            cc[1] == (b"private", ("x", "y", "z")), "integer index 1")
         self.assertTrue(cc["no-store"] is None, "key no value")
         self.assertTrue(cc["private"] == ("x", "y", "z"), "key tuple value")
         cc = CacheControl(
@@ -1030,7 +1431,7 @@ class HeaderTests(unittest.TestCase):
                                  {'charset': ['Charset', 'utf8']})
         req.set_content_type(mtype)
         self.assertTrue(req.get_header('Content-type') ==
-                        'application/octet-stream; Charset=utf8')
+                        b'application/octet-stream; Charset=utf8')
         self.assertTrue(isinstance(req.get_content_type(), params.MediaType))
 
     def test_transfer_encoding(self):
@@ -1075,7 +1476,7 @@ class HeaderTests(unittest.TestCase):
         req = Request()
         req.set_upgrade([params.ProductToken("HTTP", "2.0"),
                          params.ProductToken("SHTTP", "1.3")])
-        self.assertTrue(req.get_header("Upgrade") == "HTTP/2.0, SHTTP/1.3")
+        self.assertTrue(req.get_header("Upgrade") == b"HTTP/2.0, SHTTP/1.3")
         self.assertTrue("upgrade" in req.get_connection())
 
 

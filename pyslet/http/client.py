@@ -1,17 +1,16 @@
 #! /usr/bin/env python
 
+import errno
+import io
 import logging
-import string
-import time
+import os
+import random
 import socket
 import ssl
 import select
-import types
 import threading
-import io
-import errno
-import os
-import random
+import time
+import traceback
 
 try:
     import OpenSSL
@@ -19,16 +18,14 @@ try:
 except ImportError:
     OpenSSL = None
 
-import pyslet.info as info
-import pyslet.rfc2396 as uri
-from pyslet.pep8 import PEP8Compatibility
+from .. import info
+from .. import rfc2396 as uri
 
-import auth
-import cookie
-import grammar
-import messages
-import params
-import server as pipe
+from ..py2 import is_string, dict_values, range3, SortableMixin
+from ..pep8 import PEP8Compatibility
+from ..streams import io_blocked, Pipe
+
+from . import auth, cookie, grammar, messages, params
 
 
 class RequestManagerBusy(messages.HTTPException):
@@ -58,7 +55,7 @@ current version of the Pyslet library.  E.g.::
     pyslet-0.5.20120801"""
 
 
-class Connection(object):
+class Connection(SortableMixin):
 
     """Represents an HTTP connection.
 
@@ -189,10 +186,8 @@ class Connection(object):
     def target_key(self):
         return (self.scheme, self.host, self.port)
 
-    def __cmp__(self, other):
-        if not isinstance(other, Connection):
-            raise TypeError
-        return cmp(self.last_active, other.last_active)
+    def sortkey(self):
+        return self.last_active
 
     def __repr__(self):
         return "Connection(%s,%i)" % (self.host, self.port)
@@ -288,9 +283,9 @@ class Connection(object):
                         wait_time = (self.continue_waitmax -
                                      (time.time() - self.continue_waitstart))
                         if (wait_time < 0):
-                            logging.warn("%s timeout while waiting for "
-                                         "100-Continue response",
-                                         self.host)
+                            logging.warning("%s timeout while waiting for "
+                                            "100-Continue response",
+                                            self.host)
                             self.request_mode = self.REQ_BODY_SENDING
                             # change of mode, restart the loop
                             continue
@@ -373,9 +368,18 @@ class Connection(object):
                                     close_connection = True
                             if close_connection:
                                 self.close()
+                        else:
+                            # not waiting for the source, we might be
+                            # blocked writing out data locally so ask to
+                            # be called again immediately
+                            tbusy = 0
+                            break
                         # Any data received on the connection could
                         # change the request state, so we loop round
-                        # again
+                        # again - this is critical to ensure that
+                        # resends (of the same request) will use the
+                        # same connection during stateful message
+                        # sequences like those used in NTLM
                         continue
                 break
             elif self.request_queue:
@@ -449,10 +453,10 @@ class Connection(object):
             # we're done with the manager
             self.manager = None
             # set up some pipes for the connection
-            request.send_pipe = pipe.Pipe(
+            request.send_pipe = Pipe(
                 10 * io.DEFAULT_BUFFER_SIZE, rblocking=False,
                 timeout=self.timeout, name="%s:Sending" % self.host)
-            request.recv_pipe = pipe.Pipe(
+            request.recv_pipe = Pipe(
                 10 * io.DEFAULT_BUFFER_SIZE, wblocking=False,
                 timeout=self.timeout, name="%s:Receiving" % self.host)
             # spawn the threads that will drive the data flow
@@ -497,7 +501,7 @@ class Connection(object):
                                       self.timeout)
                         r, w, e = self.socketSelect(readers, writers, [],
                                                     self.timeout)
-                    except select.error, err:
+                    except select.error as err:
                         logging.error("Socket error from select: %s", str(err))
             else:
                 # not waiting for i/o, re-fill the send buffer
@@ -565,7 +569,7 @@ class Connection(object):
                               "readers=%s, writers=%s, timeout=None",
                               repr(readers), repr(writers))
                 r, w, e = self.socketSelect(readers, writers, [], None)
-            except select.error, err:
+            except select.error as err:
                 logging.error("Socket error from select: %s", str(err))
             try:
                 data = None
@@ -584,14 +588,14 @@ class Connection(object):
                     logging.error("socket.recv raised %s", str(err))
                     data = None
             except IOError as err:
-                if not r and messages.io_blocked(err):
+                if not r and io_blocked(err):
                     # we're blocked on recv, select did not return a reader
                     readers = [self.socket_file]
                     writers = []
                     continue
                 # We can't truly tell if the server hung-up except by
                 # getting an error here so this error could be fairly benign.
-                logging.warn("socket.recv raised %s", str(err))
+                logging.warning("socket.recv raised %s", str(err))
                 data = None
             logging.debug("Reading from %s: \n%s", self.host, repr(data))
             if data:
@@ -627,6 +631,7 @@ class Connection(object):
         if err:
             logging.error(
                 "%s: closing connection after error %s", self.host, str(err))
+            logging.debug(traceback.format_exc())
         else:
             logging.debug("%s: closing connection", self.host)
         if self.request:
@@ -646,8 +651,11 @@ class Connection(object):
             if err or response.status is None and resend:
                 # terminated by an error or before we read the response
                 if response.request.can_retry():
-                    # resend this request
-                    logging.warn("retrying %s", response.request.get_start())
+                    # retry this request - exactly as before, the retry
+                    # back-off timing strategy ensures we don't annoy
+                    # the server
+                    logging.warning("retrying %s",
+                                    response.request.get_start())
                     self.queue_request(response.request)
                     continue
                 else:
@@ -687,7 +695,7 @@ class Connection(object):
             logging.debug("Killing connection to %s", self.host)
             if not self.closed and self.socket:
                 try:
-                    logging.warn(
+                    logging.warning(
                         "Connection.kill forcing socket shutdown for %s",
                         self.host)
                     self.socket.shutdown(socket.SHUT_RDWR)
@@ -745,13 +753,13 @@ class Connection(object):
                 if self.last_rw + 2 > time.time():
                     return
             else:
-                logging.warn("socket.recv raised %s", str(err))
+                logging.warning("socket.recv raised %s", str(err))
         except IOError as err:
-            if messages.io_blocked(err):
+            if io_blocked(err):
                 # we're blocked on recv
                 return
             else:
-                logging.warn("socket.recv raised %s", str(err))
+                logging.warning("socket.recv raised %s", str(err))
         if data:
             logging.error("Unexpected data in _check_socket: %s: \n%s",
                           self.host, repr(data))
@@ -783,8 +791,10 @@ class Connection(object):
                     # we're going to swallow this error, log it
                     logging.error("socket.recv raised %s", str(err))
                     data = None
+                    # but it will result in disconnection...
+                    nbytes = 0
             except IOError as err:
-                if messages.io_blocked(err):
+                if io_blocked(err):
                     # we're blocked on send
                     return (False, True)
                 # stop everything
@@ -814,9 +824,31 @@ class Connection(object):
         return (False, False)
 
     def _recv_task(self):
-        #   We ask the response what it is expecting and try and
-        #   satisfy that, we return True when the response has been
-        #   received completely, False otherwise"""
+        # We ask the response what it is expecting and try and satisfy
+        # that, we return True when the response has been received
+        # completely, False otherwise.
+        #
+        # The return result is a 3-tuple of flags:
+        #   [0] indicates if the message is complete
+        #   [1] indicates the socket is blocked on recv
+        #   [2] indicates the socket is blocked on send
+        #
+        # The last case is possible with SSL sockets as they require
+        # handshaking in the protocol.
+        recv_needs = self.response.recv_mode()
+        if recv_needs == 0:
+            # If the response message is write-blocked we won't read the
+            # socket at all because don't want data piling up in our
+            # buffer.  There's also the case of a message that is
+            # finished but blocked on flush.
+            logging.debug("Response blocked on write")
+            self.response.recv(None)
+            if self.response.recv_mode() == 0:
+                # if we're still blocked, return
+                return (False, False, False)
+        elif recv_needs is None:
+            # make it safe to call _recv_task in this mode
+            return (True, False, False)
         err = None
         try:
             data = self.socket.recv(io.DEFAULT_BUFFER_SIZE)
@@ -833,12 +865,12 @@ class Connection(object):
                 logging.error("socket.recv raised %s", str(err))
                 data = None
         except IOError as err:
-            if messages.io_blocked(err):
+            if io_blocked(err):
                 # we're blocked on recv
                 return (False, True, False)
             # We can't truly tell if the server hung-up except by
             # getting an error here so this error could be fairly benign.
-            logging.warn("socket.recv raised %s", str(err))
+            logging.warning("socket.recv raised %s", str(err))
             data = None
         logging.debug("Reading from %s: \n%s", self.host, repr(data))
         if data:
@@ -849,8 +881,18 @@ class Connection(object):
         else:
             logging.debug("%s: closing connection after recv returned no "
                           "data on ready to read socket", self.host)
-            self.close()
-            return (True, False, False)
+            if not self.recv_buffer:
+                # empty buffer - check for read until close use case
+                if self.response.recv_mode() == messages.Message.RECV_ALL:
+                    # send an empty string indicating EOF
+                    self.response.recv(b'')
+            # TODO: split close into two phases - socket/response right
+            # now we have to keep the socket open (and will continue to
+            # read from it - failing each time) while the response is
+            # write blocked.
+            if self.response.recv_mode() != 0:
+                self.close()
+                return (True, False, False)
         # Now loop until we can't satisfy the response anymore (or the response
         # is done)
         while self.response is not None:
@@ -860,7 +902,7 @@ class Connection(object):
                 return (True, False, False)
             elif recv_needs == messages.Message.RECV_HEADERS:
                 # scan for CRLF, consolidate first
-                data = string.join(self.recv_buffer, '')
+                data = b''.join(self.recv_buffer)
                 pos = data.find(grammar.CRLF)
                 if pos == 0:
                     # just a blank line, no headers
@@ -872,9 +914,8 @@ class Connection(object):
                     # pos can't be 0 now...
                 if pos > 0:
                     # split the data into lines
-                    lines = map(
-                        lambda x: x + grammar.CRLF,
-                        data[0:pos + 2].split(grammar.CRLF))
+                    lines = [l + grammar.CRLF for l in
+                             data[0:pos + 2].split(grammar.CRLF)]
                     data = data[pos + 4:]
                 elif err:
                     self.close(err)
@@ -893,7 +934,7 @@ class Connection(object):
                     self.response.recv(lines)
             elif recv_needs == messages.Message.RECV_LINE:
                 # scan for CRLF, consolidate first
-                data = string.join(self.recv_buffer, '')
+                data = b''.join(self.recv_buffer)
                 pos = data.find(grammar.CRLF)
                 if pos >= 0:
                     line = data[0:pos + 2]
@@ -929,6 +970,9 @@ class Connection(object):
                 # we're blocked
                 logging.debug("Response blocked on write")
                 self.response.recv(None)
+                if self.response.recv_mode() == 0:
+                    # if we're still blocked, exit the loop
+                    break
             elif recv_needs > 0:
                 if self.recv_buffer_size:
                     logging.debug("Response waiting for %s bytes",
@@ -973,7 +1017,7 @@ class Connection(object):
                         snew = None
                     continue
                 break
-        except socket.gaierror, e:
+        except socket.gaierror as e:
             snew = None
             raise messages.HTTPException(
                 "failed to connect to %s (%s)" % (self.host, e[1]))
@@ -1024,11 +1068,13 @@ class SecureConnection(Connection):
                     self.socketTransport = self.socket
                     self.socket.setblocking(False)
                     self.socket = socket_ssl
+                    # turn off blocking mode from SSLSocket
+                    self.socket.setblocking(False)
                     logging.info(
                         "Connected to %s with %s, %s, key length %i",
                         self.host, *self.socket.cipher())
         except IOError as e:
-            logging.warn(str(e))
+            logging.warning(str(e))
             raise messages.HTTPException(
                 "failed to build secure connection to %s" % self.host)
 
@@ -1228,7 +1274,7 @@ class Client(PEP8Compatibility, object):
             output.append(crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
         connection.shutdown()
         connection.close()
-        return string.join(output, '')
+        return b''.join(output)
 
     def queue_request(self, request, timeout=None):
         """Starts processing an HTTP *request*
@@ -1267,7 +1313,7 @@ class Client(PEP8Compatibility, object):
                 # Step 2: search for an idle connection to the same
                 # target and bind it to our thread
                 elif target in self.cIdleTargets:
-                    cidle = self.cIdleTargets[target].values()
+                    cidle = list(dict_values(self.cIdleTargets[target]))
                     cidle.sort()
                     # take the youngest connection
                     connection = cidle[-1]
@@ -1281,7 +1327,7 @@ class Client(PEP8Compatibility, object):
                     break
                 # Step 4: delete the oldest idle connection and go round again
                 elif len(self.cIdleList):
-                    cidle = self.cIdleList.values()
+                    cidle = list(dict_values(self.cIdleList))
                     cidle.sort()
                     connection = cidle[0]
                     self._delete_idle_connection(connection)
@@ -1289,12 +1335,12 @@ class Client(PEP8Compatibility, object):
                 else:
                     now = time.time()
                     if timeout == 0:
-                        logging.warn(
+                        logging.warning(
                             "non-blocking call to queue_request failed to "
                             "obtain an HTTP connection")
                         raise RequestManagerBusy
                     elif timeout is not None and now > start + timeout:
-                        logging.warn(
+                        logging.warning(
                             "queue_request timed out while waiting for "
                             "an HTTP connection")
                         raise RequestManagerBusy
@@ -1424,7 +1470,8 @@ class Client(PEP8Compatibility, object):
         returns False."""
         thread_id = threading.current_thread().ident
         with self.managerLock:
-            connections = self.cActiveThreads.get(thread_id, {}).values()
+            connections = list(
+                dict_values(self.cActiveThreads.get(thread_id, {})))
         if not connections:
             return False
         readers = []
@@ -1451,10 +1498,10 @@ class Client(PEP8Compatibility, object):
                         wait_time = timeout
             try:
                 logging.debug("thread_task waiting for select: "
-                              "readers=%s, writers=%s, timeout=%f",
-                              repr(readers), repr(writers), timeout)
+                              "readers=%s, writers=%s, timeout=%s",
+                              repr(readers), repr(writers), str(timeout))
                 r, w, e = self.socketSelect(readers, writers, [], wait_time)
-            except select.error, err:
+            except select.error as err:
                 logging.error("Socket error from select: %s", str(err))
         elif wait_time is not None:
             # not waiting for i/o, let time pass
@@ -1490,7 +1537,7 @@ class Client(PEP8Compatibility, object):
         clist = []
         now = time.time()
         with self.managerLock:
-            for connection in self.cIdleList.values():
+            for connection in list(dict_values(self.cIdleList)):
                 if connection.last_active < now - max_inactive:
                     clist.append(connection)
                     del self.cIdleList[connection.id]
@@ -1522,7 +1569,8 @@ class Client(PEP8Compatibility, object):
         now = time.time()
         with self.managerLock:
             for thread_id in self.cActiveThreads:
-                for connection in self.cActiveThreads[thread_id].values():
+                for connection in list(
+                        dict_values(self.cActiveThreads[thread_id])):
                     if connection.last_active < now - max_inactive:
                         # remove this connection from the active lists
                         del self.cActiveThreads[thread_id][connection.id]
@@ -1561,6 +1609,12 @@ class Client(PEP8Compatibility, object):
         with self.managerLock:
             self.credentials.append(credentials)
 
+    def update_credentials(self, credentials, success_path):
+        if isinstance(credentials, auth.BasicCredentials):
+            # path rule only works for BasicCredentials
+            with self.managerLock:
+                credentials.add_success_path(success_path)
+
     def remove_credentials(self, credentials):
         """Removes credentials from this manager.
 
@@ -1572,7 +1626,7 @@ class Client(PEP8Compatibility, object):
         as it is possible that two threads may independently call the
         method with the same credentials."""
         with self.managerLock:
-            for i in xrange(len(self.credentials)):
+            for i in range3(len(self.credentials)):
                 if self.credentials[i] is credentials:
                     del self.credentials[i]
 
@@ -1695,14 +1749,14 @@ class ClientRequest(messages.Request):
         self.set_url(url)
         # copy over the keyword arguments
         self.method = method
-        if type(protocol) in types.StringTypes:
+        if is_string(protocol):
             self.protocol = params.HTTPVersion.from_str(protocol)
         elif isinstance(protocol, params.HTTPVersion):
             self.protocol = protocol
         else:
             raise TypeError("illegal value for protocol")
         #: the response body received (only used if not streaming)
-        self.res_body = ''
+        self.res_body = b''
         if res_body is not None:
             # assume that the res_body is a stream like object
             self.res_bodystream = res_body
@@ -1712,24 +1766,27 @@ class ClientRequest(messages.Request):
         self.auto_redirect = auto_redirect
         #: the maximum number of retries we'll attempt
         self.max_retries = max_retries
-        #: the number of retries we've had
-        self.nretries = 0
-        self.retry_time = 0
-        self._rt1 = 0
-        self._rt2 = min_retry_time
+        self.min_retry_time = min_retry_time
+        self._init_retries()
         #: the associated :py:class:`ClientResponse`
         self.response = ClientResponse(request=self)
         # the credentials we're using in this request, this attribute is
-        # used when we are responding to a 401 and the managing Client
-        # has credentials that meet the challenge received in the
-        # response.  We keep track of them here to avoid constantly
-        # looping with the same broken credentials. to set the
-        # Authorization header and
-        self.tried_credentials = None
+        # used both pre-emptively and when we are responding to a 401
+        # and the managing Client has credentials that meet the
+        # challenge received in the response.  We keep track of them
+        # here to avoid constantly looping with the same broken
+        # credentials. to set the Authorization header and
+        self.session_credentials = None
         #: the send pipe to use on upgraded connections
         self.send_pipe = None
         #: the recv pipe to use on upgraded connections
         self.recv_pipe = None
+
+    def _init_retries(self):
+        self.nretries = 0
+        self.retry_time = 0
+        self._rt1 = 0
+        self._rt2 = self.min_retry_time
 
     def set_url(self, url):
         """Sets the URL for this request
@@ -1798,6 +1855,8 @@ class ClientRequest(messages.Request):
         # minute from the cookie store
         self.set_cookie(None)
         logging.info("Resending request to: %s", str(self.url))
+        # clear retries as if this was a new request
+        self._init_retries()
         self.manager.queue_request(self)
 
     def set_client(self, client):
@@ -1833,8 +1892,8 @@ class ClientRequest(messages.Request):
 
             For idempotent methods we lose a life every time.  For
             non-idempotent methods (e.g., POST) we do the same except
-            that if we been (at least partially) sent then we lose all
-            lives to prevent "indeterminate results"."""
+            that if we've been (at least partially) sent then we lose
+            all lives to prevent "indeterminate results"."""
         self.nretries += 1
         if self.is_idempotent() or send_pos <= self._send_pos:
             self.retry_time = (time.time() +
@@ -1852,9 +1911,12 @@ class ClientRequest(messages.Request):
     def send_header(self):
         # Check authorization and add credentials if the manager has them
         if not self.has_header("Authorization"):
-            credentials = self.manager.find_credentials_by_url(self.url)
-            if credentials:
-                self.set_authorization(credentials)
+            base_credentials = self.manager.find_credentials_by_url(self.url)
+            if base_credentials:
+                # try and start a new authentication session
+                self.session_credentials = base_credentials.get_response()
+            if self.session_credentials:
+                self.set_authorization(self.session_credentials)
         if (self.manager.cookie_store is not None and
                 not self.has_header("Cookie")):
             # add some cookies to this request
@@ -1881,7 +1943,7 @@ class ClientRequest(messages.Request):
                     cookie_list = self.response.get_set_cookie()
                 except ValueError as e:
                     # ignore these cookies
-                    logging.warn("Ignoring cookies after %s", str(e))
+                    logging.warning("Ignoring cookies after %s", str(e))
                     cookie_list = None
                 if cookie_list:
                     for icookie in cookie_list:
@@ -1890,8 +1952,8 @@ class ClientRequest(messages.Request):
                                 self.url, icookie)
                             logging.info("Stored cookie: %s", str(icookie))
                         except cookie.CookieError as e:
-                            logging.warn("Error setting cookie %s: %s",
-                                         icookie.name, str(e))
+                            logging.warning("Error setting cookie %s: %s",
+                                            icookie.name, str(e))
             if self.res_bodystream:
                 self.res_bodystream.flush()
             else:
@@ -1909,22 +1971,35 @@ class ClientRequest(messages.Request):
                         # bound to this connection until it closes
                         self.response.keep_alive = True
                     else:
+                        logging.debug(
+                            "100 Continue received... ready to send request")
                         self.connection.continue_sending(self)
                         # We're not finished though, wait for the final
                         # response to be sent. No need to reset as the
                         # 100 response should not have a body
             elif self.connection:
                 # The response was received before the connection
-                # finished with us
+                # finished with us (we may still be sending the request)
                 if self.status >= 300:
-                    # Some type of error condition....
-                    if isinstance(self.send_body(), str):
-                        # There was more data to send in the request but we
-                        # don't plan to send it so we have to hang up!
+                    # Some type of error condition.... do we still have
+                    # data to send?
+                    if not self.response.keep_alive:
+                        # we got a connection close, or we're HTTP/1.0
                         self.connection.request_disconnect()
-                    # else, we were finished anyway... the connection will
-                    # discover this itself
-                elif self.response >= 200:
+                    else:
+                        # we may try and keep the connection alive
+                        unsent = self.abort_sending()
+                        if unsent < 0 or unsent > io.DEFAULT_BUFFER_SIZE:
+                            # lots of (or unspecified) data left to send
+                            # we don't plan to send it so we have to
+                            # hang up!
+                            self.connection.request_disconnect()
+                        else:
+                            # we might just be waiting for a 100-continue
+                            self.connection.continue_sending(self)
+                    # else, we were finished (or almost finished)
+                    # anyway... the connection will discover this itself
+                elif self.status >= 200:
                     # For 2xx result codes we let the connection finish
                     # spooling and disconnect from us when it is done
                     pass
@@ -1945,18 +2020,33 @@ class ClientRequest(messages.Request):
         make us go away.  Whatever.  The point is that you can't be sure
         that all the data was transmitted just because you got here and
         the server says everything is OK"""
-        if self.tried_credentials is not None:
-            # we were trying out some credentials, if this is not a 401 assume
-            # they're good
+        if self.session_credentials is not None:
+            # handle an existing authentication session
             if self.status == 401:
-                # we must remove these credentials, they matched the challenge
-                # but still resulted in 401
-                self.manager.remove_credentials(self.tried_credentials)
+                challenges = self.response.get_www_authenticate()
+                new_credentials = None
+                for c in challenges:
+                    new_credentials = self.session_credentials.get_response(c)
+                    if new_credentials:
+                        break
+                if new_credentials:
+                    # authentication session continues, can iterate
+                    self.session_credentials = new_credentials
+                    self.set_authorization(self.session_credentials)
+                    self.resend()  # to the same URL
+                    return
+                else:
+                    # we must remove the base credentials, they matched
+                    # the original challenge (or URL) but still resulted
+                    # in a failed authentication session - if we don't
+                    # they'll be found again below
+                    self.manager.remove_credentials(
+                        self.session_credentials.base)
             else:
-                if isinstance(self.tried_credentials, auth.BasicCredentials):
-                    # path rule only works for BasicCredentials
-                    self.tried_credentials.add_success_path(self.url.abs_path)
-            self.tried_credentials = None
+                self.manager.update_credentials(self.session_credentials,
+                                                self.url.abs_path)
+            # we're done, no need to continue sending credentials
+            self.session_credentials = None
         if (self.auto_redirect and self.status >= 300 and
                 self.status <= 399 and
                 (self.status != 302 or
@@ -1967,18 +2057,31 @@ class ClientRequest(messages.Request):
             # confirmed by the user
             location = self.response.get_location()
             if location:
-                if not location.host:
+                if not location.authority:
                     # This is an error but a common one (thanks IIS!)
+                    logging.warning(
+                        "Relative Location header: %s", str(location))
                     location = location.resolve(self.url)
                 self.resend(location)
         elif self.status == 401:
             challenges = self.response.get_www_authenticate()
             for c in challenges:
                 c.protectionSpace = self.url.get_canonical_root()
-                self.tried_credentials = self.manager.find_credentials(c)
-                if self.tried_credentials:
-                    self.set_authorization(self.tried_credentials)
+                base_credentials = self.manager.find_credentials(c)
+                if base_credentials:
+                    self.session_credentials = base_credentials.get_response(c)
+                if self.session_credentials:
+                    self.set_authorization(self.session_credentials)
                     self.resend()  # to the same URL
+                    return
+        elif self.status == 417:
+            # special handling of expectation failure
+            if self.get_expect_continue():
+                # RFC7231 more clearly states that we should try again
+                # now but with lower expectations!
+                self.set_expect_continue(False)
+                self.resend()
+                return
 
 
 class ClientResponse(messages.Response):
@@ -2005,10 +2108,9 @@ class ClientResponse(messages.Response):
         Override the :py:meth:`Finished` method instead to clean up and
         process the complete response normally."""
         logging.debug(
-            "Request: %s %s %s", self.request.method, self.request.url,
-            str(self.request.protocol))
-        logging.debug(
-            "Got Response: %i %s", self.status, self.reason)
+            "Request: %s %s %s, got Response: %i %s", self.request.method,
+            self.request.url, str(self.request.protocol), self.status,
+            self.reason)
         logging.debug("Response headers: %s", repr(self.headers))
         super(ClientResponse, self).handle_headers()
 

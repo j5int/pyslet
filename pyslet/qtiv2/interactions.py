@@ -1,13 +1,12 @@
 #! /usr/bin/env python
 
-import pyslet.xmlnames20091208 as xmlns
-import pyslet.html40_19991224 as html
-import pyslet.xsdatatypes20041028 as xsi
-
-import pyslet.qtiv2.core as core
-import pyslet.qtiv2.content as content
-
 import itertools
+
+from . import core
+from . import content
+from .. import html401 as html
+from ..xml import structures as xml
+from ..xml import xsdatatypes as xsi
 
 
 class Interaction(content.BodyElement):
@@ -17,7 +16,8 @@ class Interaction(content.BodyElement):
 
             <xsd:attributeGroup name="interaction.AttrGroup">
                     <xsd:attributeGroup ref="bodyElement.AttrGroup"/>
-                    <xsd:attribute name="responseIdentifier" type="identifier.Type" use="required"/>
+                    <xsd:attribute name="responseIdentifier"
+                    type="identifier.Type" use="required"/>
             </xsd:attributeGroup>"""
     XMLATTR_responseIdentifier = (
         'responseIdentifier', core.ValidateIdentifier, lambda x: x)
@@ -40,16 +40,17 @@ class BlockInteraction(html.BlockMixin, Interaction):
 
             <xsd:group name="blockInteraction.ContentGroup">
                     <xsd:sequence>
-                            <xsd:element ref="prompt" minOccurs="0" maxOccurs="1"/>
+                            <xsd:element ref="prompt" minOccurs="0"
+                            maxOccurs="1"/>
                     </xsd:sequence>
             </xsd:group>"""
-    XMLCONTENT = xmlns.ElementContent
+    XMLCONTENT = xml.ElementContent
 
     def __init__(self, parent):
         Interaction.__init__(self, parent)
         self.Prompt = None
 
-    def GetChildren(self):
+    def get_children(self):
         if self.Prompt:
             yield self.Prompt
 
@@ -61,27 +62,28 @@ class Prompt(content.BodyElement):
 
             <xsd:group name="prompt.ContentGroup">
                     <xsd:sequence>
-                            <xsd:group ref="inlineStatic.ElementGroup" minOccurs="0" maxOccurs="unbounded"/>
+                            <xsd:group ref="inlineStatic.ElementGroup"
+                            minOccurs="0" maxOccurs="unbounded"/>
                     </xsd:sequence>
             </xsd:group>"""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'prompt')
-    XMLCONTENT = xmlns.XMLMixedContent
+    XMLCONTENT = xml.XMLMixedContent
 
     def __init__(self, parent):
         content.BodyElement.__init__(self, parent)
 
-    def ChildElement(self, childClass, name=None):
-        if issubclass(childClass, html.InlineMixin):
-            return content.BodyElement.ChildElement(self, childClass, name)
+    def add_child(self, child_class, name=None):
+        if issubclass(child_class, html.InlineMixin):
+            return content.BodyElement.add_child(self, child_class, name)
         else:
             # This child cannot go in here
             raise core.QTIValidityError(
-                "%s in %s" % (childClass.__name__, self.__class__.__name__))
+                "%s in %s" % (child_class.__name__, self.__class__.__name__))
 
-    def RenderHTML(self, parent, profile, itemState):
-        htmlP = parent.ChildElement(html.P)
-        htmlP.styleClass = "prompt"
-        self.RenderHTMLChildren(htmlP, profile, itemState)
+    def render_html(self, parent, profile, item_state):
+        html_p = parent.add_child(html.P)
+        html_p.style_class = ["prompt"]
+        self.render_html_children(html_p, profile, item_state)
 
 
 class Choice(content.BodyElement):
@@ -91,17 +93,21 @@ class Choice(content.BodyElement):
 
             <xsd:attributeGroup name="choice.AttrGroup">
                     <xsd:attributeGroup ref="bodyElement.AttrGroup"/>
-                    <xsd:attribute name="identifier" type="identifier.Type" use="required"/>
-                    <xsd:attribute name="fixed" type="boolean.Type" use="optional"/>
-                    <xsd:attribute name="templateIdentifier" type="identifier.Type" use="optional"/>
-                    <xsd:attribute name="showHide" type="showHide.Type" use="optional"/>
+                    <xsd:attribute name="identifier" type="identifier.Type"
+                    use="required"/>
+                    <xsd:attribute name="fixed" type="boolean.Type"
+                    use="optional"/>
+                    <xsd:attribute name="templateIdentifier"
+                    type="identifier.Type" use="optional"/>
+                    <xsd:attribute name="showHide" type="showHide.Type"
+                    use="optional"/>
             </xsd:attributeGroup>"""
     XMLATTR_identifier = ('identifier', core.ValidateIdentifier, lambda x: x)
-    XMLATTR_fixed = ('fixed', xsi.DecodeBoolean, xsi.EncodeBoolean)
+    XMLATTR_fixed = ('fixed', xsi.boolean_from_str, xsi.boolean_to_str)
     XMLATTR_templateIdentifier = (
         'templateIdentifier', core.ValidateIdentifier, lambda x: x)
     XMLATTR_showHide = (
-        'showHide', core.ShowHide.DecodeLowerValue, core.ShowHide.EncodeValue)
+        'showHide', core.ShowHide.from_str_lower, core.ShowHide.to_str)
 
     def __init__(self, parent):
         content.BodyElement.__init__(self, parent)
@@ -134,26 +140,32 @@ class AssociableChoice(Choice):
 class ChoiceInteraction(BlockInteraction):
 
     """The choice interaction presents a set of choices to the candidate. The
-    candidate's task is to select one or more of the choices, up to a maximum of
-    maxChoices::
+    candidate's task is to select one or more of the choices, up to a maximum
+    of maxChoices::
 
             <xsd:attributeGroup name="choiceInteraction.AttrGroup">
                     <xsd:attributeGroup ref="blockInteraction.AttrGroup"/>
-                    <xsd:attribute name="shuffle" type="boolean.Type" use="required"/>
-                    <xsd:attribute name="maxChoices" type="integer.Type" use="required"/>
-                    <xsd:attribute name="minChoices" type="integer.Type" use="optional"/>
+                    <xsd:attribute name="shuffle" type="boolean.Type"
+                    use="required"/>
+                    <xsd:attribute name="maxChoices" type="integer.Type"
+                    use="required"/>
+                    <xsd:attribute name="minChoices" type="integer.Type"
+                    use="optional"/>
             </xsd:attributeGroup>
 
             <xsd:group name="choiceInteraction.ContentGroup">
                     <xsd:sequence>
                             <xsd:group ref="blockInteraction.ContentGroup"/>
-                            <xsd:element ref="simpleChoice" minOccurs="1" maxOccurs="unbounded"/>
+                            <xsd:element ref="simpleChoice" minOccurs="1"
+                            maxOccurs="unbounded"/>
                     </xsd:sequence>
             </xsd:group>"""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'choiceInteraction')
-    XMLATTR_shuffle = ('shuffle', xsi.DecodeBoolean, xsi.EncodeBoolean)
-    XMLATTR_maxChoices = ('maxChoices', xsi.DecodeInteger, xsi.EncodeInteger)
-    XMLATTR_minChoices = ('minChoices', xsi.DecodeInteger, xsi.EncodeInteger)
+    XMLATTR_shuffle = ('shuffle', xsi.boolean_from_str, xsi.boolean_to_str)
+    XMLATTR_maxChoices = (
+        'maxChoices', xsi.integer_from_str, xsi.integer_to_str)
+    XMLATTR_minChoices = (
+        'minChoices', xsi.integer_from_str, xsi.integer_to_str)
 
     def __init__(self, parent):
         BlockInteraction.__init__(self, parent)
@@ -162,15 +174,16 @@ class ChoiceInteraction(BlockInteraction):
         self.minChoices = None
         self.SimpleChoice = []
 
-    def GetChildren(self):
-        for child in itertools.chain(BlockInteraction.GetChildren(self), self.SimpleChoice):
+    def get_children(self):
+        for child in itertools.chain(BlockInteraction.get_children(self),
+                                     self.SimpleChoice):
             yield child
 
-    def RenderHTML(self, parent, profile, itemState):
-        htmlDiv = parent.ChildElement(html.Div)
-        htmlDiv.styleClass = "choiceInteraction"
-        for child in self.GetChildren():
-            child.RenderHTML(htmlDiv, profile, itemState)
+    def render_html(self, parent, profile, item_state):
+        html_div = parent.add_child(html.Div)
+        html_div.style_class = ["choiceInteraction"]
+        for child in self.get_children():
+            child.render_html(html_div, profile, item_state)
 
 
 class OrderInteraction(BlockInteraction):
@@ -180,26 +193,33 @@ class OrderInteraction(BlockInteraction):
 
             <xsd:attributeGroup name="orderInteraction.AttrGroup">
                     <xsd:attributeGroup ref="blockInteraction.AttrGroup"/>
-                    <xsd:attribute name="shuffle" type="boolean.Type" use="required"/>
-                    <xsd:attribute name="minChoices" type="integer.Type" use="optional"/>
-                    <xsd:attribute name="maxChoices" type="integer.Type" use="optional"/>
-                    <xsd:attribute name="orientation" type="orientation.Type" use="optional"/>
+                    <xsd:attribute name="shuffle" type="boolean.Type"
+                    use="required"/>
+                    <xsd:attribute name="minChoices" type="integer.Type"
+                    use="optional"/>
+                    <xsd:attribute name="maxChoices" type="integer.Type"
+                    use="optional"/>
+                    <xsd:attribute name="orientation" type="orientation.Type"
+                    use="optional"/>
             </xsd:attributeGroup>
 
             <xsd:group name="orderInteraction.ContentGroup">
                     <xsd:sequence>
                             <xsd:group ref="blockInteraction.ContentGroup"/>
-                            <xsd:element ref="simpleChoice" minOccurs="1" maxOccurs="unbounded"/>
+                            <xsd:element ref="simpleChoice" minOccurs="1"
+                            maxOccurs="unbounded"/>
                     </xsd:sequence>
             </xsd:group>"""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'orderInteraction')
-    XMLATTR_shuffle = ('shuffle', xsi.DecodeBoolean, xsi.EncodeBoolean)
-    XMLATTR_maxChoices = ('maxChoices', xsi.DecodeInteger, xsi.EncodeInteger)
-    XMLATTR_minChoices = ('minChoices', xsi.DecodeInteger, xsi.EncodeInteger)
+    XMLATTR_shuffle = ('shuffle', xsi.boolean_from_str, xsi.boolean_to_str)
+    XMLATTR_maxChoices = (
+        'maxChoices', xsi.integer_from_str, xsi.integer_to_str)
+    XMLATTR_minChoices = (
+        'minChoices', xsi.integer_from_str, xsi.integer_to_str)
     XMLATTR_orientation = (
         'orientation',
-        core.Orientation.DecodeLowerValue,
-        core.Orientation.EncodeValue)
+        core.Orientation.from_str_lower,
+        core.Orientation.to_str)
 
     def __init__(self, parent):
         BlockInteraction.__init__(self, parent)
@@ -209,17 +229,17 @@ class OrderInteraction(BlockInteraction):
         self.orientation = None
         self.SimpleChoice = []
 
-    def GetChildren(self):
+    def get_children(self):
         for child in itertools.chain(
-                BlockInteraction.GetChildren(self),
+                BlockInteraction.get_children(self),
                 self.SimpleChoice):
             yield child
 
-    def RenderHTML(self, parent, profile, itemState):
-        htmlDiv = parent.ChildElement(html.Div)
-        htmlDiv.styleClass = "orderInteraction"
-        for child in self.GetChildren():
-            child.RenderHTML(htmlDiv, profile, itemState)
+    def render_html(self, parent, profile, item_state):
+        html_div = parent.add_child(html.Div)
+        html_div.style_class = ["orderInteraction"]
+        for child in self.get_children():
+            child.render_html(html_div, profile, item_state)
 
 
 class SimpleChoice(content.FlowContainerMixin, Choice):
@@ -229,52 +249,53 @@ class SimpleChoice(content.FlowContainerMixin, Choice):
 
             <xsd:group name="simpleChoice.ContentGroup">
                     <xsd:sequence>
-                            <xsd:group ref="flowStatic.ElementGroup" minOccurs="0" maxOccurs="unbounded"/>
+                            <xsd:group ref="flowStatic.ElementGroup"
+                            minOccurs="0" maxOccurs="unbounded"/>
                     </xsd:sequence>
             </xsd:group>"""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'simpleChoice')
-    XMLCONTENT = xmlns.XMLMixedContent
+    XMLCONTENT = xml.XMLMixedContent
 
-    def ChildElement(self, childClass, name=None):
-        if issubclass(childClass, html.FlowMixin):
-            return Choice.ChildElement(self, childClass, name)
+    def add_child(self, child_class, name=None):
+        if issubclass(child_class, html.FlowMixin):
+            return Choice.add_child(self, child_class, name)
         else:
             # This child cannot go in here
             raise core.QTIValidityError(
                 "%s in %s" % (repr(name), self.__class__.__name__))
 
-    def RenderHTML(self, parent, profile, itemState):
+    def render_html(self, parent, profile, item_state):
         # what type of choice are we?
-        interaction = self.FindParent(Interaction)
+        interaction = self.find_parent(Interaction)
         if isinstance(interaction, ChoiceInteraction):
             # represented as a DL with DD for each choice
-            htmlDiv = parent.ChildElement(html.Div)
-            htmlDiv.styleClass = 'simpleChoice'
-            htmlInput = htmlDiv.ChildElement(html.Input)
-            sName = interaction.responseIdentifier + ".SAVED"
-            if sName in itemState:
-                v = itemState[sName]
+            html_div = parent.add_child(html.Div)
+            html_div.style_class = ['simpleChoice']
+            html_input = html_div.add_child(html.Input)
+            sname = interaction.responseIdentifier + ".SAVED"
+            if sname in item_state:
+                v = item_state[sname]
             else:
-                v = itemState[interaction.responseIdentifier]
+                v = item_state[interaction.responseIdentifier]
             if interaction.maxChoices != 1:
                 # we need to be a check-box
-                htmlInput.type = html.InputType.checkbox
-                htmlInput.name = itemState.formPrefix + \
+                html_input.type = html.InputType.checkbox
+                html_input.name = item_state.formPrefix + \
                     interaction.responseIdentifier
-                htmlInput.value = self.identifier
-                htmlInput.checked = (self.identifier in v.value)
+                html_input.value = self.identifier
+                html_input.checked = (self.identifier in v.value)
             else:
                 # we should be a radio button
-                htmlInput.type = html.InputType.radio
-                htmlInput.name = itemState.formPrefix + \
+                html_input.type = html.InputType.radio
+                html_input.name = item_state.formPrefix + \
                     interaction.responseIdentifier
-                htmlInput.value = self.identifier
-                htmlInput.checked = (v.value == self.identifier)
-            parent = htmlDiv
+                html_input.value = self.identifier
+                html_input.checked = (v.value == self.identifier)
+            parent = html_div
         elif isinstance(interaction, OrderInteraction):
             # we need to be a pull down menu of rank orderings
             raise NotImplementedError
-        self.RenderHTMLChildren(parent, profile, itemState)
+        self.render_html_children(parent, profile, item_state)
 
 
 class AssociateInteraction(BlockInteraction):
@@ -285,23 +306,27 @@ class AssociateInteraction(BlockInteraction):
 
             <xsd:attributeGroup name="associateInteraction.AttrGroup">
                     <xsd:attributeGroup ref="blockInteraction.AttrGroup"/>
-                    <xsd:attribute name="shuffle" type="boolean.Type" use="required"/>
-                    <xsd:attribute name="maxAssociations" type="integer.Type" use="required"/>
-                    <xsd:attribute name="minAssociations" type="integer.Type" use="optional"/>
+                    <xsd:attribute name="shuffle" type="boolean.Type"
+                    use="required"/>
+                    <xsd:attribute name="maxAssociations" type="integer.Type"
+                    use="required"/>
+                    <xsd:attribute name="minAssociations" type="integer.Type"
+                    use="optional"/>
             </xsd:attributeGroup>
 
             <xsd:group name="associateInteraction.ContentGroup">
                     <xsd:sequence>
                             <xsd:group ref="blockInteraction.ContentGroup"/>
-                            <xsd:element ref="simpleAssociableChoice" minOccurs="1" maxOccurs="unbounded"/>
+                            <xsd:element ref="simpleAssociableChoice"
+                            minOccurs="1" maxOccurs="unbounded"/>
                     </xsd:sequence>
             </xsd:group>"""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'associateInteraction')
-    XMLATTR_shuffle = ('shuffle', xsi.DecodeBoolean, xsi.EncodeBoolean)
+    XMLATTR_shuffle = ('shuffle', xsi.boolean_from_str, xsi.boolean_to_str)
     XMLATTR_maxAssociations = (
-        'maxAssociations', xsi.DecodeInteger, xsi.EncodeInteger)
+        'maxAssociations', xsi.integer_from_str, xsi.integer_to_str)
     XMLATTR_minAssociations = (
-        'minAssociations', xsi.DecodeInteger, xsi.EncodeInteger)
+        'minAssociations', xsi.integer_from_str, xsi.integer_to_str)
 
     def __init__(self, parent):
         BlockInteraction.__init__(self, parent)
@@ -310,17 +335,17 @@ class AssociateInteraction(BlockInteraction):
         self.minAssociations = None
         self.SimpleAssociableChoice = []
 
-    def GetChildren(self):
+    def get_children(self):
         for child in itertools.chain(
-                BlockInteraction.GetChildren(self),
+                BlockInteraction.get_children(self),
                 self.SimpleAssociableChoice):
             yield child
 
-    def RenderHTML(self, parent, profile, itemState):
-        htmlDiv = parent.ChildElement(html.Div)
-        htmlDiv.styleClass = "associateInteraction"
-        for child in self.GetChildren():
-            child.RenderHTML(htmlDiv, profile, itemState)
+    def render_html(self, parent, profile, item_state):
+        html_div = parent.add_child(html.Div)
+        html_div.style_class = ["associateInteraction"]
+        for child in self.get_children():
+            child.render_html(html_div, profile, item_state)
 
 
 class MatchInteraction(BlockInteraction):
@@ -331,23 +356,27 @@ class MatchInteraction(BlockInteraction):
 
             <xsd:attributeGroup name="matchInteraction.AttrGroup">
                     <xsd:attributeGroup ref="blockInteraction.AttrGroup"/>
-                    <xsd:attribute name="shuffle" type="boolean.Type" use="required"/>
-                    <xsd:attribute name="maxAssociations" type="integer.Type" use="required"/>
-                    <xsd:attribute name="minAssociations" type="integer.Type" use="optional"/>
+                    <xsd:attribute name="shuffle" type="boolean.Type"
+                    use="required"/>
+                    <xsd:attribute name="maxAssociations" type="integer.Type"
+                    use="required"/>
+                    <xsd:attribute name="minAssociations" type="integer.Type"
+                    use="optional"/>
             </xsd:attributeGroup>
 
             <xsd:group name="matchInteraction.ContentGroup">
                     <xsd:sequence>
                             <xsd:group ref="blockInteraction.ContentGroup"/>
-                            <xsd:element ref="simpleMatchSet" minOccurs="2" maxOccurs="2"/>
+                            <xsd:element ref="simpleMatchSet" minOccurs="2"
+                            maxOccurs="2"/>
                     </xsd:sequence>
             </xsd:group>"""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'matchInteraction')
-    XMLATTR_shuffle = ('shuffle', xsi.DecodeBoolean, xsi.EncodeBoolean)
+    XMLATTR_shuffle = ('shuffle', xsi.boolean_from_str, xsi.boolean_to_str)
     XMLATTR_maxAssociations = (
-        'maxAssociations', xsi.DecodeInteger, xsi.EncodeInteger)
+        'maxAssociations', xsi.integer_from_str, xsi.integer_to_str)
     XMLATTR_minAssociations = (
-        'minAssociations', xsi.DecodeInteger, xsi.EncodeInteger)
+        'minAssociations', xsi.integer_from_str, xsi.integer_to_str)
 
     def __init__(self, parent):
         BlockInteraction.__init__(self, parent)
@@ -356,17 +385,17 @@ class MatchInteraction(BlockInteraction):
         self.minAssociations = None
         self.SimpleMatchSet = []
 
-    def GetChildren(self):
+    def get_children(self):
         for child in itertools.chain(
-                BlockInteraction.GetChildren(self),
+                BlockInteraction.get_children(self),
                 self.SimpleMatchSet):
             yield child
 
-    def RenderHTML(self, parent, profile, itemState):
-        htmlDiv = parent.ChildElement(html.Div)
-        htmlDiv.styleClass = "matchInteraction"
-        for child in self.GetChildren():
-            child.RenderHTML(htmlDiv, profile, itemState)
+    def render_html(self, parent, profile, item_state):
+        html_div = parent.add_child(html.Div)
+        html_div.style_class = ["matchInteraction"]
+        for child in self.get_children():
+            child.render_html(html_div, profile, item_state)
 
 
 class SimpleAssociableChoice(content.FlowContainerMixin, AssociableChoice):
@@ -376,28 +405,31 @@ class SimpleAssociableChoice(content.FlowContainerMixin, AssociableChoice):
 
             <xsd:attributeGroup name="simpleAssociableChoice.AttrGroup">
                     <xsd:attributeGroup ref="associableChoice.AttrGroup"/>
-                    <xsd:attribute name="matchMax" type="integer.Type" use="required"/>
-                    <xsd:attribute name="matchMin" type="integer.Type" use="optional"/>
+                    <xsd:attribute name="matchMax" type="integer.Type"
+                    use="required"/>
+                    <xsd:attribute name="matchMin" type="integer.Type"
+                    use="optional"/>
             </xsd:attributeGroup>
 
             <xsd:group name="simpleAssociableChoice.ContentGroup">
                     <xsd:sequence>
-                            <xsd:group ref="flowStatic.ElementGroup" minOccurs="0" maxOccurs="unbounded"/>
+                            <xsd:group ref="flowStatic.ElementGroup"
+                            minOccurs="0" maxOccurs="unbounded"/>
                     </xsd:sequence>
             </xsd:group>"""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'simpleAssociableChoice')
-    XMLATTR_matchMax = ('matchMax', xsi.DecodeInteger, xsi.EncodeInteger)
-    XMLATTR_matchMin = ('matchMin', xsi.DecodeInteger, xsi.EncodeInteger)
-    XMLCONTENT = xmlns.XMLMixedContent
+    XMLATTR_matchMax = ('matchMax', xsi.integer_from_str, xsi.integer_to_str)
+    XMLATTR_matchMin = ('matchMin', xsi.integer_from_str, xsi.integer_to_str)
+    XMLCONTENT = xml.XMLMixedContent
 
     def __init__(self, parent):
         AssociableChoice.__init__(self, parent)
         self.matchMax = None
         self.matchMin = None
 
-    def ChildElement(self, childClass, name=None):
-        if issubclass(childClass, html.FlowMixin):
-            return Choice.ChildElement(self, childClass, name)
+    def add_child(self, child_class, name=None):
+        if issubclass(child_class, html.FlowMixin):
+            return Choice.add_child(self, child_class, name)
         else:
             # This child cannot go in here
             raise core.QTIValidityError(
@@ -411,17 +443,18 @@ class SimpleMatchSet(core.QTIElement):
 
             <xsd:group name="simpleMatchSet.ContentGroup">
                     <xsd:sequence>
-                            <xsd:element ref="simpleAssociableChoice" minOccurs="0" maxOccurs="unbounded"/>
+                            <xsd:element ref="simpleAssociableChoice"
+                            minOccurs="0" maxOccurs="unbounded"/>
                     </xsd:sequence>
             </xsd:group>"""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'simpleMatchSet')
-    XMLCONTENT = xmlns.ElementContent
+    XMLCONTENT = xml.ElementContent
 
     def __init__(self, parent):
         core.QTIElement.__init__(self, parent)
         self.SimpleAssociableChoice = []
 
-    def GetChildren(self):
+    def get_children(self):
         for child in self.SimpleAssociableChoice:
             yield child
 
@@ -433,59 +466,64 @@ class GapMatchInteraction(BlockInteraction):
 
             <xsd:attributeGroup name="gapMatchInteraction.AttrGroup">
                     <xsd:attributeGroup ref="blockInteraction.AttrGroup"/>
-                    <xsd:attribute name="shuffle" type="boolean.Type" use="required"/>
+                    <xsd:attribute name="shuffle" type="boolean.Type"
+                    use="required"/>
             </xsd:attributeGroup>
 
             <xsd:group name="gapMatchInteraction.ContentGroup">
                     <xsd:sequence>
                             <xsd:group ref="blockInteraction.ContentGroup"/>
-                            <xsd:group ref="gapChoice.ElementGroup" minOccurs="1" maxOccurs="unbounded"/>
-                            <xsd:group ref="blockStatic.ElementGroup" minOccurs="1" maxOccurs="unbounded"/>
+                            <xsd:group ref="gapChoice.ElementGroup"
+                            minOccurs="1" maxOccurs="unbounded"/>
+                            <xsd:group ref="blockStatic.ElementGroup"
+                            minOccurs="1" maxOccurs="unbounded"/>
                     </xsd:sequence>
             </xsd:group>"""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'gapMatchInteraction')
-    XMLATTR_shuffle = ('shuffle', xsi.DecodeBoolean, xsi.EncodeBoolean)
+    XMLATTR_shuffle = ('shuffle', xsi.boolean_from_str, xsi.boolean_to_str)
 
     def __init__(self, parent):
         BlockInteraction.__init__(self, parent)
         self.shuffle = False
         self.GapChoice = []
 
-    def GetChildren(self):
+    def get_children(self):
         for child in itertools.chain(
-                BlockInteraction.GetChildren(self),
+                BlockInteraction.get_children(self),
                 self.GapChoice):
             yield child
-        for child in content.BodyElement.GetChildren(self):
+        for child in content.BodyElement.get_children(self):
             yield child
 
-    def ChildElement(self, childClass, name=None):
-        if issubclass(childClass, (Prompt, GapChoice, html.BlockMixin)):
-            return BlockInteraction.ChildElement(self, childClass, name)
+    def add_child(self, child_class, name=None):
+        if issubclass(child_class, (Prompt, GapChoice, html.BlockMixin)):
+            return BlockInteraction.add_child(self, child_class, name)
         else:
             # This child cannot go in here
             raise core.QTIValidityError(
                 "%s in %s" % (repr(name), self.__class__.__name__))
 
-    def RenderHTML(self, parent, profile, itemState):
-        htmlDiv = parent.ChildElement(html.Div)
-        htmlDiv.styleClass = "gapMatchInteraction"
-        for child in self.GetChildren():
-            child.RenderHTML(htmlDiv, profile, itemState)
+    def render_html(self, parent, profile, item_state):
+        html_div = parent.add_child(html.Div)
+        html_div.style_class = ["gapMatchInteraction"]
+        for child in self.get_children():
+            child.render_html(html_div, profile, item_state)
 
 
 class Gap(html.InlineMixin, AssociableChoice):
 
-    """A gap is an inline element that must only appear within a gapMatchInteraction
+    """A gap is an inline element that must only appear within a
+    gapMatchInteraction
     ::
 
             <xsd:attributeGroup name="gap.AttrGroup">
                     <xsd:attributeGroup ref="associableChoice.AttrGroup"/>
-                    <xsd:attribute name="required" type="boolean.Type" use="optional"/>
+                    <xsd:attribute name="required" type="boolean.Type"
+                    use="optional"/>
             </xsd:attributeGroup>"""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'gap')
-    XMLATTR_required = ('required', xsi.DecodeBoolean, xsi.EncodeBoolean)
-    XMLCONTENT = xmlns.XMLEmpty
+    XMLATTR_required = ('required', xsi.boolean_from_str, xsi.boolean_to_str)
+    XMLCONTENT = xml.XMLEmpty
 
     def __init__(self, parent):
         AssociableChoice.__init__(self, parent)
@@ -500,11 +538,13 @@ class GapChoice(AssociableChoice):
 
             <xsd:attributeGroup name="gapChoice.AttrGroup">
                     <xsd:attributeGroup ref="associableChoice.AttrGroup"/>
-                    <xsd:attribute name="matchMax" type="integer.Type" use="required"/>
-                    <xsd:attribute name="matchMin" type="integer.Type" use="optional"/>
+                    <xsd:attribute name="matchMax" type="integer.Type"
+                    use="required"/>
+                    <xsd:attribute name="matchMin" type="integer.Type"
+                    use="optional"/>
             </xsd:attributeGroup>"""
-    XMLATTR_matchMax = ('matchMax', xsi.DecodeInteger, xsi.EncodeInteger)
-    XMLATTR_matchMin = ('matchMin', xsi.DecodeInteger, xsi.EncodeInteger)
+    XMLATTR_matchMax = ('matchMax', xsi.integer_from_str, xsi.integer_to_str)
+    XMLATTR_matchMin = ('matchMin', xsi.integer_from_str, xsi.integer_to_str)
 
     def __init__(self, parent):
         AssociableChoice.__init__(self, parent)
@@ -519,19 +559,20 @@ class GapText(GapChoice):
 
             <xsd:group name="gapText.ContentGroup">
                     <xsd:sequence>
-                            <xsd:element ref="printedVariable" minOccurs="0" maxOccurs="unbounded"/>
+                            <xsd:element ref="printedVariable" minOccurs="0"
+                            maxOccurs="unbounded"/>
                     </xsd:sequence>
             </xsd:group>"""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'gapText')
-    XMLCONTENT = xmlns.XMLMixedContent
+    XMLCONTENT = xml.XMLMixedContent
 
-    def ChildElement(self, childClass, name=None):
-        if issubclass(childClass, content.PrintedVariable):
-            return GapChoice.ChildElement(self, childClass, name)
+    def add_child(self, child_class, name=None):
+        if issubclass(child_class, content.PrintedVariable):
+            return GapChoice.add_child(self, child_class, name)
         else:
             # This child cannot go in here
             raise core.QTIValidityError(
-                "%s in %s" % (childClass.__name__, self.__class__.__name__))
+                "%s in %s" % (child_class.__name__, self.__class__.__name__))
 
 
 class GapImg(GapChoice):
@@ -541,25 +582,27 @@ class GapImg(GapChoice):
 
             <xsd:attributeGroup name="gapImg.AttrGroup">
                     <xsd:attributeGroup ref="gapChoice.AttrGroup"/>
-                    <xsd:attribute name="objectLabel" type="string.Type" use="optional"/>
+                    <xsd:attribute name="objectLabel" type="string.Type"
+                    use="optional"/>
             </xsd:attributeGroup>
 
             <xsd:group name="gapImg.ContentGroup">
                     <xsd:sequence>
-                            <xsd:element ref="object" minOccurs="1" maxOccurs="1"/>
+                            <xsd:element ref="object" minOccurs="1"
+                            maxOccurs="1"/>
                     </xsd:sequence>
             </xsd:group>"""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'gapImg')
     XMLATTR_objectLabel = 'objectLabel'
-    XMLCONTENT = xmlns.ElementContent
+    XMLCONTENT = xml.ElementContent
 
     def __init__(self, parent):
         GapChoice.__init__(self, parent)
         self.objectLabel = None
         self.Object = html.Object(self)
-        content.FixHTMLNamespace(self.Object)
+        content.fix_html_namespace(self.Object)
 
-    def GetChildren(self):
+    def get_children(self):
         yield self.Object
 
 
@@ -570,19 +613,22 @@ class InlineChoiceInteraction(InlineInteraction):
 
             <xsd:attributeGroup name="inlineChoiceInteraction.AttrGroup">
                     <xsd:attributeGroup ref="inlineInteraction.AttrGroup"/>
-                    <xsd:attribute name="shuffle" type="boolean.Type" use="required"/>
-                    <xsd:attribute name="required" type="boolean.Type" use="optional"/>
+                    <xsd:attribute name="shuffle" type="boolean.Type"
+                    use="required"/>
+                    <xsd:attribute name="required" type="boolean.Type"
+                    use="optional"/>
             </xsd:attributeGroup>
 
             <xsd:group name="inlineChoiceInteraction.ContentGroup">
                     <xsd:sequence>
-                            <xsd:element ref="inlineChoice" minOccurs="1" maxOccurs="unbounded"/>
+                            <xsd:element ref="inlineChoice" minOccurs="1"
+                            maxOccurs="unbounded"/>
                     </xsd:sequence>
             </xsd:group>"""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'inlineChoiceInteraction')
-    XMLATTR_shuffle = ('shuffle', xsi.DecodeBoolean, xsi.EncodeBoolean)
-    XMLATTR_required = ('required', xsi.DecodeBoolean, xsi.EncodeBoolean)
-    XMLCONTENT = xmlns.ElementContent
+    XMLATTR_shuffle = ('shuffle', xsi.boolean_from_str, xsi.boolean_to_str)
+    XMLATTR_required = ('required', xsi.boolean_from_str, xsi.boolean_to_str)
+    XMLCONTENT = xml.ElementContent
 
     def __init__(self, parent):
         InlineInteraction.__init__(self, parent)
@@ -590,7 +636,7 @@ class InlineChoiceInteraction(InlineInteraction):
         self.required = False
         self.InlineChoice = []
 
-    def GetChildren(self):
+    def get_children(self):
         for child in self.InlineChoice:
             yield child
 
@@ -602,39 +648,45 @@ class InlineChoice(Choice):
 
             <xsd:group name="inlineChoice.ContentGroup">
                     <xsd:sequence>
-                            <xsd:element ref="printedVariable" minOccurs="0" maxOccurs="unbounded"/>
+                            <xsd:element ref="printedVariable" minOccurs="0"
+                            maxOccurs="unbounded"/>
                     </xsd:sequence>
             </xsd:group>"""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'inlineChoice')
-    XMLCONTENT = xmlns.XMLMixedContent
+    XMLCONTENT = xml.XMLMixedContent
 
-    def ChildElement(self, childClass, name=None):
-        if issubclass(childClass, content.PrintedVariable):
-            return Choice.ChildElement(self, childClass, name)
+    def add_child(self, child_class, name=None):
+        if issubclass(child_class, content.PrintedVariable):
+            return Choice.add_child(self, child_class, name)
         else:
             # This child cannot go in here
             raise core.QTIValidityError(
-                "%s in %s" % (childClass.__name__, self.__class__.__name__))
+                "%s in %s" % (child_class.__name__, self.__class__.__name__))
 
 
 class StringInteractionMixin:
 
     """Abstract mix-in class for interactions based on free-text input.  String
-    interactions can be bound to numeric response variables, instead of strings,
-    if desired::
+    interactions can be bound to numeric response variables, instead of
+    strings, if desired::
 
             <xsd:attributeGroup name="stringInteraction.AttrGroup">
-                    <xsd:attribute name="base" type="integer.Type" use="optional"/>
-                    <xsd:attribute name="stringIdentifier" type="identifier.Type" use="optional"/>
-                    <xsd:attribute name="expectedLength" type="integer.Type" use="optional"/>
-                    <xsd:attribute name="patternMask" type="string.Type" use="optional"/>
-                    <xsd:attribute name="placeholderText" type="string.Type" use="optional"/>
+                    <xsd:attribute name="base" type="integer.Type"
+                    use="optional"/>
+                    <xsd:attribute name="stringIdentifier"
+                    type="identifier.Type" use="optional"/>
+                    <xsd:attribute name="expectedLength" type="integer.Type"
+                    use="optional"/>
+                    <xsd:attribute name="patternMask" type="string.Type"
+                    use="optional"/>
+                    <xsd:attribute name="placeholderText" type="string.Type"
+                    use="optional"/>
             </xsd:attributeGroup>"""
-    XMLATTR_base = ('base', xsi.DecodeInteger, xsi.EncodeInteger)
+    XMLATTR_base = ('base', xsi.integer_from_str, xsi.integer_to_str)
     XMLATTR_stringIdentifier = (
         'stringIdentifier', core.ValidateIdentifier, lambda x: x)
     XMLATTR_expectedLength = (
-        'expectedLength', xsi.DecodeInteger, xsi.EncodeInteger)
+        'expectedLength', xsi.integer_from_str, xsi.integer_to_str)
     XMLATTR_patternMask = 'patternMask'
     XMLATTR_placeholderText = 'placeholderText'
 
@@ -651,14 +703,14 @@ class TextEntryInteraction(StringInteractionMixin, InlineInteraction):
     """A textEntry interaction is an inlineInteraction that obtains a simple
     piece of text from the candidate."""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'textEntryInteraction')
-    XMLCONTENT = xmlns.XMLEmpty
+    XMLCONTENT = xml.XMLEmpty
 
     def __init__(self, parent):
         InlineInteraction.__init__(self, parent)
         StringInteractionMixin.__init__(self)
 
 
-class TextFormat(xsi.Enumeration):
+class TextFormat(xsi.EnumerationNoCase):
 
     """Used to control the format of the text entered by the candidate::
 
@@ -678,14 +730,15 @@ class TextFormat(xsi.Enumeration):
 
             TextFormat.DEFAULT == TextFormat.plain
 
-    For more methods see :py:class:`~pyslet.xsdatatypes20041028.Enumeration`"""
+    For more methods see :py:class:`~pyslet.xml.xsdatatypes.Enumeration`"""
     decode = {
         'plain': 1,
         'preFormatted': 2,
         'xhtml': 3
     }
-xsi.MakeEnumeration(TextFormat, 'plain')
-xsi.MakeLowerAliases(TextFormat)
+    aliases = {
+        None: 'plain'
+    }
 
 
 class ExtendedTextInteraction(StringInteractionMixin, BlockInteraction):
@@ -696,18 +749,24 @@ class ExtendedTextInteraction(StringInteractionMixin, BlockInteraction):
             <xsd:attributeGroup name="extendedTextInteraction.AttrGroup">
                     <xsd:attributeGroup ref="blockInteraction.AttrGroup"/>
                     <xsd:attributeGroup ref="stringInteraction.AttrGroup"/>
-                    <xsd:attribute name="maxStrings" type="integer.Type" use="optional"/>
-                    <xsd:attribute name="minStrings" type="integer.Type" use="optional"/>
-                    <xsd:attribute name="expectedLines" type="integer.Type" use="optional"/>
-                    <xsd:attribute name="format" type="textFormat.Type" use="optional"/>
+                    <xsd:attribute name="maxStrings" type="integer.Type"
+                    use="optional"/>
+                    <xsd:attribute name="minStrings" type="integer.Type"
+                    use="optional"/>
+                    <xsd:attribute name="expectedLines" type="integer.Type"
+                    use="optional"/>
+                    <xsd:attribute name="format" type="textFormat.Type"
+                    use="optional"/>
             </xsd:attributeGroup>"""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'extendedTextInteraction')
-    XMLATTR_maxStrings = ('maxStrings', xsi.DecodeInteger, xsi.EncodeInteger)
-    XMLATTR_minStrings = ('minStrings', xsi.DecodeInteger, xsi.EncodeInteger)
+    XMLATTR_maxStrings = (
+        'maxStrings', xsi.integer_from_str, xsi.integer_to_str)
+    XMLATTR_minStrings = (
+        'minStrings', xsi.integer_from_str, xsi.integer_to_str)
     XMLATTR_expectedLines = (
-        'expectedLines', xsi.DecodeInteger, xsi.EncodeInteger)
+        'expectedLines', xsi.integer_from_str, xsi.integer_to_str)
     XMLATTR_format = (
-        'format', TextFormat.DecodeLowerValue, TextFormat.EncodeValue)
+        'format', TextFormat.from_str_lower, TextFormat.to_str)
 
     def __init__(self, parent):
         BlockInteraction.__init__(self, parent)
@@ -726,29 +785,34 @@ class HottextInteraction(BlockInteraction):
 
             <xsd:attributeGroup name="hottextInteraction.AttrGroup">
                     <xsd:attributeGroup ref="blockInteraction.AttrGroup"/>
-                    <xsd:attribute name="maxChoices" type="integer.Type" use="required"/>
-                    <xsd:attribute name="minChoices" type="integer.Type" use="optional"/>
+                    <xsd:attribute name="maxChoices" type="integer.Type"
+                    use="required"/>
+                    <xsd:attribute name="minChoices" type="integer.Type"
+                    use="optional"/>
             </xsd:attributeGroup>
 
             <xsd:group name="hottextInteraction.ContentGroup">
                     <xsd:sequence>
                             <xsd:group ref="blockInteraction.ContentGroup"/>
-                            <xsd:group ref="blockStatic.ElementGroup" minOccurs="1" maxOccurs="unbounded"/>
+                            <xsd:group ref="blockStatic.ElementGroup"
+                            minOccurs="1" maxOccurs="unbounded"/>
                     </xsd:sequence>
             </xsd:group>
     """
     XMLNAME = (core.IMSQTI_NAMESPACE, 'hottextInteraction')
-    XMLATTR_maxChoices = ('maxChoices', xsi.DecodeInteger, xsi.EncodeInteger)
-    XMLATTR_minChoices = ('minChoices', xsi.DecodeInteger, xsi.EncodeInteger)
+    XMLATTR_maxChoices = (
+        'maxChoices', xsi.integer_from_str, xsi.integer_to_str)
+    XMLATTR_minChoices = (
+        'minChoices', xsi.integer_from_str, xsi.integer_to_str)
 
     def __init__(self, parent):
         BlockInteraction.__init__(self, parent)
         self.maxChoices = 1
         self.minChoices = None
 
-    def ChildElement(self, childClass, name=None):
-        if issubclass(childClass, (Prompt, html.BlockMixin)):
-            return BlockInteraction.ChildElement(self, childClass, name)
+    def add_child(self, child_class, name=None):
+        if issubclass(child_class, (Prompt, html.BlockMixin)):
+            return BlockInteraction.add_child(self, child_class, name)
         else:
             # This child cannot go in here
             raise core.QTIValidityError(
@@ -762,15 +826,16 @@ class Hottext(html.FlowMixin, Choice):
 
             <xsd:group name="hottext.ContentGroup">
                     <xsd:sequence>
-                            <xsd:group ref="inlineStatic.ElementGroup" minOccurs="0" maxOccurs="unbounded"/>
+                            <xsd:group ref="inlineStatic.ElementGroup"
+                            minOccurs="0" maxOccurs="unbounded"/>
                     </xsd:sequence>
             </xsd:group>"""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'hottext')
-    XMLCONTENT = xmlns.XMLMixedContent
+    XMLCONTENT = xml.XMLMixedContent
 
-    def ChildElement(self, childClass, name=None):
-        if issubclass(childClass, html.InlineMixin):
-            return Choice.ChildElement(self, childClass, name)
+    def add_child(self, child_class, name=None):
+        if issubclass(child_class, html.InlineMixin):
+            return Choice.add_child(self, child_class, name)
         else:
             # This child cannot go in here
             raise core.QTIValidityError(
@@ -783,13 +848,16 @@ class HotspotMixin:
     areas or hotspots::
 
             <xsd:attributeGroup name="hotspot.AttrGroup">
-                    <xsd:attribute name="shape" type="shape.Type" use="required"/>
-                    <xsd:attribute name="coords" type="coords.Type" use="required"/>
-                    <xsd:attribute name="hotspotLabel" type="string256.Type" use="optional"/>
+                    <xsd:attribute name="shape" type="shape.Type"
+                    use="required"/>
+                    <xsd:attribute name="coords" type="coords.Type"
+                    use="required"/>
+                    <xsd:attribute name="hotspotLabel" type="string256.Type"
+                    use="optional"/>
             </xsd:attributeGroup>"""
     XMLATTR_shape = (
-        'shape', core.Shape.DecodeLowerValue, core.Shape.EncodeValue)
-    XMLATTR_coords = ('coords', html.Coords, html.Coords.__unicode__)
+        'shape', core.Shape.from_str_lower, core.Shape.to_str)
+    XMLATTR_coords = ('coords', html.Coords.from_str, html.Coords.__unicode__)
     XMLATTR_hotspotLabel = 'hotspotLabel'
 
     def __init__(self):
@@ -808,7 +876,7 @@ class HotspotChoice(HotspotMixin, Choice):
                     <xsd:attributeGroup ref="hotspot.AttrGroup"/>
             </xsd:attributeGroup>"""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'hotspotChoice')
-    XMLCONTENT = xmlns.XMLEmpty
+    XMLCONTENT = xml.XMLEmpty
 
     def __init__(self, parent):
         Choice.__init__(self, parent)
@@ -823,13 +891,15 @@ class AssociableHotspot(HotspotMixin, AssociableChoice):
             <xsd:attributeGroup name="associableHotspot.AttrGroup">
                     <xsd:attributeGroup ref="associableChoice.AttrGroup"/>
                     <xsd:attributeGroup ref="hotspot.AttrGroup"/>
-                    <xsd:attribute name="matchMax" type="integer.Type" use="required"/>
-                    <xsd:attribute name="matchMin" type="integer.Type" use="optional"/>
+                    <xsd:attribute name="matchMax" type="integer.Type"
+                    use="required"/>
+                    <xsd:attribute name="matchMin" type="integer.Type"
+                    use="optional"/>
             </xsd:attributeGroup>"""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'associableHotspot')
-    XMLATTR_matchMax = ('matchMax', xsi.DecodeInteger, xsi.EncodeInteger)
-    XMLATTR_matchMin = ('matchMin', xsi.DecodeInteger, xsi.EncodeInteger)
-    XMLCONTENT = xmlns.XMLEmpty
+    XMLATTR_matchMax = ('matchMax', xsi.integer_from_str, xsi.integer_to_str)
+    XMLATTR_matchMin = ('matchMin', xsi.integer_from_str, xsi.integer_to_str)
+    XMLCONTENT = xml.XMLEmpty
 
     def __init__(self, parent):
         AssociableChoice.__init__(self, parent)
@@ -846,17 +916,18 @@ class GraphicInteraction(BlockInteraction):
             <xsd:group name="graphicInteraction.ContentGroup">
                     <xsd:sequence>
                             <xsd:group ref="blockInteraction.ContentGroup"/>
-                            <xsd:element ref="object" minOccurs="1" maxOccurs="1"/>
+                            <xsd:element ref="object" minOccurs="1"
+                            maxOccurs="1"/>
                     </xsd:sequence>
             </xsd:group>"""
 
     def __init__(self, parent):
         BlockInteraction.__init__(self, parent)
         self.Object = html.Object(self)
-        content.FixHTMLNamespace(self.Object)
+        content.fix_html_namespace(self.Object)
 
-    def GetChildren(self):
-        for child in BlockInteraction.GetChildren(self):
+    def get_children(self):
+        for child in BlockInteraction.get_children(self):
             yield child
         yield self.Object
 
@@ -868,19 +939,24 @@ class HotspotInteraction(GraphicInteraction):
 
             <xsd:attributeGroup name="hotspotInteraction.AttrGroup">
                     <xsd:attributeGroup ref="graphicInteraction.AttrGroup"/>
-                    <xsd:attribute name="maxChoices" type="integer.Type" use="required"/>
-                    <xsd:attribute name="minChoices" type="integer.Type" use="optional"/>
+                    <xsd:attribute name="maxChoices" type="integer.Type"
+                    use="required"/>
+                    <xsd:attribute name="minChoices" type="integer.Type"
+                    use="optional"/>
             </xsd:attributeGroup>
 
             <xsd:group name="hotspotInteraction.ContentGroup">
                     <xsd:sequence>
                             <xsd:group ref="graphicInteraction.ContentGroup"/>
-                            <xsd:element ref="hotspotChoice" minOccurs="1" maxOccurs="unbounded"/>
+                            <xsd:element ref="hotspotChoice" minOccurs="1"
+                            maxOccurs="unbounded"/>
                     </xsd:sequence>
             </xsd:group>"""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'hotspotInteraction')
-    XMLATTR_maxChoices = ('maxChoices', xsi.DecodeInteger, xsi.EncodeInteger)
-    XMLATTR_minChoices = ('minChoices', xsi.DecodeInteger, xsi.EncodeInteger)
+    XMLATTR_maxChoices = (
+        'maxChoices', xsi.integer_from_str, xsi.integer_to_str)
+    XMLATTR_minChoices = (
+        'minChoices', xsi.integer_from_str, xsi.integer_to_str)
 
     def __init__(self, parent):
         GraphicInteraction.__init__(self, parent)
@@ -888,9 +964,9 @@ class HotspotInteraction(GraphicInteraction):
         self.minChoices = None
         self.HotspotChoice = []
 
-    def GetChildren(self):
+    def get_children(self):
         return itertools.chain(
-            GraphicInteraction.GetChildren(self),
+            GraphicInteraction.get_children(self),
             self.HotspotChoice)
 
 
@@ -901,12 +977,16 @@ class SelectPointInteraction(GraphicInteraction):
 
             <xsd:attributeGroup name="selectPointInteraction.AttrGroup">
                     <xsd:attributeGroup ref="graphicInteraction.AttrGroup"/>
-                    <xsd:attribute name="maxChoices" type="integer.Type" use="required"/>
-                    <xsd:attribute name="minChoices" type="integer.Type" use="optional"/>
+                    <xsd:attribute name="maxChoices" type="integer.Type"
+                    use="required"/>
+                    <xsd:attribute name="minChoices" type="integer.Type"
+                    use="optional"/>
             </xsd:attributeGroup>"""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'selectPointInteraction')
-    XMLATTR_maxChoices = ('maxChoices', xsi.DecodeInteger, xsi.EncodeInteger)
-    XMLATTR_minChoices = ('minChoices', xsi.DecodeInteger, xsi.EncodeInteger)
+    XMLATTR_maxChoices = (
+        'maxChoices', xsi.integer_from_str, xsi.integer_to_str)
+    XMLATTR_minChoices = (
+        'minChoices', xsi.integer_from_str, xsi.integer_to_str)
 
     def __init__(self, parent):
         GraphicInteraction.__init__(self, parent)
@@ -923,23 +1003,29 @@ class SliderInteraction(BlockInteraction):
 
             <xsd:attributeGroup name="sliderInteraction.AttrGroup">
                     <xsd:attributeGroup ref="blockInteraction.AttrGroup"/>
-                    <xsd:attribute name="lowerBound" type="float.Type" use="required"/>
-                    <xsd:attribute name="upperBound" type="float.Type" use="required"/>
-                    <xsd:attribute name="step" type="integer.Type" use="optional"/>
-                    <xsd:attribute name="stepLabel" type="boolean.Type" use="optional"/>
-                    <xsd:attribute name="orientation" type="orientation.Type" use="optional"/>
-                    <xsd:attribute name="reverse" type="boolean.Type" use="optional"/>
+                    <xsd:attribute name="lowerBound" type="float.Type"
+                    use="required"/>
+                    <xsd:attribute name="upperBound" type="float.Type"
+                    use="required"/>
+                    <xsd:attribute name="step" type="integer.Type"
+                    use="optional"/>
+                    <xsd:attribute name="stepLabel" type="boolean.Type"
+                    use="optional"/>
+                    <xsd:attribute name="orientation" type="orientation.Type"
+                    use="optional"/>
+                    <xsd:attribute name="reverse" type="boolean.Type"
+                    use="optional"/>
             </xsd:attributeGroup>"""
     XMLNAME = (core.IMSQTI_NAMESPACE, 'sliderInteraction')
-    XMLATTR_lowerBound = ('lowerBound', xsi.DecodeFloat, xsi.EncodeFloat)
-    XMLATTR_upperBound = ('upperBound', xsi.DecodeFloat, xsi.EncodeFloat)
-    XMLATTR_step = ('step', xsi.DecodeInteger, xsi.EncodeInteger)
-    XMLATTR_stepLabel = ('stepLabel', xsi.DecodeBoolean, xsi.EncodeBoolean)
+    XMLATTR_lowerBound = ('lowerBound', xsi.float_from_str, xsi.float_to_str)
+    XMLATTR_upperBound = ('upperBound', xsi.float_from_str, xsi.float_to_str)
+    XMLATTR_step = ('step', xsi.integer_from_str, xsi.integer_to_str)
+    XMLATTR_stepLabel = ('stepLabel', xsi.boolean_from_str, xsi.boolean_to_str)
     XMLATTR_orientation = (
         'orientation',
-        core.Orientation.DecodeLowerValue,
-        core.Orientation.EncodeValue)
-    XMLATTR_reverse = ('reverse', xsi.DecodeBoolean, xsi.EncodeBoolean)
+        core.Orientation.from_str_lower,
+        core.Orientation.to_str)
+    XMLATTR_reverse = ('reverse', xsi.boolean_from_str, xsi.boolean_to_str)
 
     def __init__(self, parent):
         BlockInteraction.__init__(self, parent)

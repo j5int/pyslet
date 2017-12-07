@@ -1,13 +1,10 @@
 #! /usr/bin/env python
 
-import pyslet.xml20081126.structures as xml
-import pyslet.xsdatatypes20041028 as xsi
-import pyslet.imsqtiv2p1 as qtiv2
+import itertools
 
-import core
-import common
-
-import string
+from . import common
+from . import core
+from ..xml import structures as xml
 
 
 class Section(core.ObjectMixin, core.SectionMixin, common.QTICommentContainer):
@@ -60,9 +57,9 @@ class Section(core.ObjectMixin, core.SectionMixin, common.QTICommentContainer):
         self.QTIReference = None
         self.SectionItemMixin = []
 
-    def GetChildren(self):
+    def get_children(self):
         for child in itertools.chain(
-                core.QTIComment.GetChildren(self),
+                core.QTIComment.get_children(self),
                 self.QTIMetadata,
                 self.Objectives,
                 self.SectionControl,
@@ -85,12 +82,13 @@ class Section(core.ObjectMixin, core.SectionMixin, common.QTICommentContainer):
         for child in self.SectionItemMixin:
             yield child
 
-    def MigrateV2(self, output):
+    def migrate_to_v2(self, output):
         """Converts this section to QTI v2
 
-        For details, see :py:class:`pyslet.qtiv1.QuesTestInterop.MigrateV2`."""
+        For details, see
+        :py:class:`pyslet.qtiv1.QuesTestInterop.migrate_to_v2`."""
         for obj in self.SectionItemMixin:
-            obj.MigrateV2(output)
+            obj.migrate_to_v2(output)
 
 
 class SectionPrecondition(core.QTIElement):
@@ -123,15 +121,15 @@ class SectionControl(common.QTICommentContainer):
             hintswitch  (Yes | No )  'Yes'
             solutionswitch  (Yes | No )  'Yes'
             view	(All | Administrator | AdminAuthority | Assessor | Author |
-                            Candidate | InvigilatorProctor | Psychometrician | Scorer |
-                            Tutor ) 'All' >"""
+                            Candidate | InvigilatorProctor | Psychometrician |
+                            Scorer | Tutor ) 'All' >"""
     XMLNAME = 'sectioncontrol'
     XMLATTR_feedbackswitch = (
         'feedbackSwitch', core.ParseYesNo, core.FormatYesNo)
     XMLATTR_hintswitch = ('hintSwitch', core.ParseYesNo, core.FormatYesNo)
     XMLATTR_solutionswitch = (
         'solutionSwitch', core.ParseYesNo, core.FormatYesNo)
-    XMLATTR_view = ('view', core.View.DecodeLowerValue, core.View.EncodeValue)
+    XMLATTR_view = ('view', core.View.from_str_lower, core.View.to_str)
     XMLCONTENT = xml.ElementContent
 
     def __init__(self, parent):
@@ -152,7 +150,7 @@ class SectionProcExtension(core.QTIElement):
     XMLCONTENT = xml.XMLMixedContent
 
 
-class SectionFeedback(common.QTICommentContainer, common.ContentMixin):
+class SectionFeedback(common.ContentMixin, common.QTICommentContainer):
 
     """The container for the Section-level feedback that is to be presented as a
     result of Section-level processing of the user's responses::
@@ -160,12 +158,12 @@ class SectionFeedback(common.QTICommentContainer, common.ContentMixin):
     <!ELEMENT sectionfeedback (qticomment? , (material+ | flow_mat+))>
     <!ATTLIST sectionfeedback
             view	(All | Administrator | AdminAuthority | Assessor | Author |
-                            Candidate | InvigilatorProctor | Psychometrician | Scorer |
-                            Tutor ) 'All'
+                            Candidate | InvigilatorProctor | Psychometrician |
+                            Scorer | Tutor ) 'All'
             ident CDATA  #REQUIRED
             title CDATA  #IMPLIED >"""
     XMLNAME = 'sectionfeedback'
-    XMLATTR_view = ('view', core.View.DecodeLowerValue, core.View.EncodeValue)
+    XMLATTR_view = ('view', core.View.from_str_lower, core.View.to_str)
     XMLATTR_ident = 'ident'
     XMLATTR_title = 'title'
     XMLCONTENT = xml.ElementContent
@@ -177,16 +175,13 @@ class SectionFeedback(common.QTICommentContainer, common.ContentMixin):
         self.ident = None
         self.title = None
 
-    def GetChildren(self):
+    def get_children(self):
         return itertools.chain(
-            common.QTICommentContainer.GetChildren(self),
-            common.ContentMixin.GetContentChildren(self))
+            common.QTICommentContainer.get_children(self),
+            common.ContentMixin.get_content_children(self))
 
-    def ContentMixin(self, childClass):
-        if childClass in (common.Material, common.FlowMat):
-            common.ContentMixin.ContentMixin(self, childClass)
-        else:
-            raise TypeError
+    def content_child(self, child_class):
+        return child_class in (common.Material, common.FlowMat)
 
 
 class SectionRef(core.SectionMixin, core.QTIElement):
@@ -203,7 +198,7 @@ class SectionRef(core.SectionMixin, core.QTIElement):
         core.QTIElement.__init__(self, parent)
         self.linkrefid = None
 
-    def MigrateV2(self, output):
+    def migrate_to_v2(self, output):
         """Converts this sectionref to QTI v2
 
         Currently does nothing."""
@@ -213,8 +208,8 @@ class SectionRef(core.SectionMixin, core.QTIElement):
 class ItemRef(core.QTIElement, core.SectionItemMixin):
 
     """This element is used to 'pull' an Item into the scope. This is used to
-    refer to a Item that has been defined elsewhere but which is to be logically
-    related to this group of Items::
+    refer to a Item that has been defined elsewhere but which is to be
+    logically related to this group of Items::
 
     <!ELEMENT itemref (#PCDATA)>
     <!ATTLIST itemref  linkrefid CDATA  #REQUIRED >"""
@@ -226,7 +221,7 @@ class ItemRef(core.QTIElement, core.SectionItemMixin):
         core.QTIElement.__init__(self, parent)
         self.linkrefid = None
 
-    def MigrateV2(self, output):
+    def migrate_to_v2(self, output):
         """Converts this itemref to QTI v2
 
         Currently does nothing."""

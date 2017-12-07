@@ -1,8 +1,12 @@
-""" Python Character Mapping Codec symbol generated from 'codecs/SYMBOL.TXT' with gencodec.py.
+""" Python Character Mapping Codec symbol generated from 'codecs/SYMBOL.TXT'
+with gencodec.py.
 
 """  # "
 
 import codecs
+
+from .py2 import range3
+
 
 # Codec APIs
 
@@ -52,7 +56,7 @@ def getregentry():
 
 # Decoding Map
 
-decoding_map = codecs.make_identity_dict(range(256))
+decoding_map = codecs.make_identity_dict(list(range3(256)))
 decoding_map.update({
     0x22: 0x2200,  # FOR ALL
     0x24: 0x2203,  # THERE EXISTS
