@@ -2957,9 +2957,6 @@ class EntityCollection(DictionaryLike, PEP8Compatibility):
     def close(self):
         pass
 
-    def __del__(self):
-        self.close()
-
     def get_location(self):
         """Returns the location of this collection as a
         :py:class:`~pyslet.rfc2396.URI` instance.
